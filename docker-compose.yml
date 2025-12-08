@@ -44,9 +44,8 @@ services:
       OLLAMA_HOST: 0.0.0.0:11434
     networks:
       - bot_network
-    entrypoint: sh -c '/bin/ollama serve & sleep 10 && MODEL=$${LOCAL_MODEL:-mistral} && echo "Checking model $${MODEL}..." && if ! /usr/bin/ollama list | grep -q $${MODEL}; then echo "Pulling model $${MODEL}..." && /usr/bin/ollama pull $${MODEL}; else echo "Model $${MODEL} exists"; fi && wait'
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags > /dev/null || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -104,7 +103,6 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
-        labels: service=github-commits-bot
     deploy:
       resources:
         limits:
