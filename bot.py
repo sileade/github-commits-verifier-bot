@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Conversation states
-REPO_INPUT, COMMIT_INPUT, ACTION_CONFIRM = range(3)
+REPO_INPUT, COMMIT_INPUT, ACTION_CONFIRM, CONFIRM_ACTION = range(4)
 
 # Database initialization
 db = Database()
@@ -43,24 +43,32 @@ github_service: Optional[GitHubService] = None
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Start command handler
+    Start command handler - show main menu
     """
     user_id = update.effective_user.id
     await db.add_user(user_id, update.effective_user.username or 'unknown')
+    
+    menu_text = (
+        "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+        "┃  🤖 GitHub Commits Verifier  ┃\n"
+        "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+        "Добро пожаловать! Этот бот помогает проверять\n"
+        "и подтверждать коммиты GitHub приложений.\n\n"
+        "Выберите действие ниже:"
+    )
     
     keyboard = [
         [InlineKeyboardButton("🔍 Проверить коммит", callback_data='check_commit')],
         [InlineKeyboardButton("✅ Подтвердить коммит", callback_data='approve_commit')],
         [InlineKeyboardButton("❌ Отклонить коммит", callback_data='reject_commit')],
         [InlineKeyboardButton("📊 История", callback_data='history')],
+        [InlineKeyboardButton("📈 Статистика", callback_data='stats_menu')],
         [InlineKeyboardButton("⚙️ Настройки", callback_data='settings')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🤖 *GitHub Commits Verifier Bot*\n\n"
-        "Добро пожаловать! Этот бот помогает проверять и подтверждать коммиты GitHub приложений.\n\n"
-        "Выберите действие:",
+        menu_text,
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -74,13 +82,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "*📚 Справка по командам:*\n\n"
         "/start - Главное меню\n"
         "/help - Эта справка\n"
-        "/check_repo - Проверить репозиторий\n"
         "/stats - Статистика проверок\n\n"
         "*Основные функции:*\n"
         "🔍 Проверить коммит - просмотр информации о коммите\n"
         "✅ Подтвердить коммит - отметить коммит как легитимный\n"
         "❌ Отклонить коммит - отметить коммит как подозрительный\n"
         "📊 История - просмотр истории проверок\n"
+        "📈 Статистика - ваша статистика проверок\n"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -97,7 +105,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Main menu callbacks
     if callback_data == 'check_commit':
         await query.edit_message_text(
-            text="📝 Введите полный URL репозитория GitHub или имя в формате: `owner/repo`",
+            text="📝 Введите полный URL репозитория GitHub или имя в формате: `owner/repo`\n\nПример: `sileade/github-commits-verifier-bot`",
             parse_mode='Markdown'
         )
         context.user_data['action'] = 'check_commit'
@@ -105,7 +113,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     elif callback_data == 'approve_commit':
         await query.edit_message_text(
-            text="✅ Введите SHA коммита для подтверждения:",
+            text="✅ Введите SHA коммита для подтверждения:\n\nПример: `a1b2c3d4e5f6g7h8`",
             parse_mode='Markdown'
         )
         context.user_data['action'] = 'approve_commit'
@@ -113,7 +121,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
     elif callback_data == 'reject_commit':
         await query.edit_message_text(
-            text="❌ Введите SHA коммита для отклонения:",
+            text="❌ Введите SHA коммита для отклонения:\n\nПример: `a1b2c3d4e5f6g7h8`",
             parse_mode='Markdown'
         )
         context.user_data['action'] = 'reject_commit'
@@ -124,73 +132,112 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         history = await db.get_user_history(user_id, limit=10)
         
         if not history:
+            keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(
-                "📋 История проверок пуста.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]])
+                "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+                "┃   📋 История пуста              ┃\n"
+                "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+                "Вы еще не выполнили никаких проверок.",
+                reply_markup=reply_markup
             )
         else:
-            history_text = "*📊 История проверок (последние 10):*\n\n"
+            history_text = (
+                "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+                "┃  📊 История проверок (10)     ┃\n"
+                "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+            )
             for i, record in enumerate(history, 1):
                 status_emoji = "✅" if record['status'] == 'approved' else "❌"
-                history_text += f"{i}. {status_emoji} {record['repo']} - {record['commit_sha'][:8]}...\n"
+                history_text += f"{i}. {status_emoji} `{record['repo']}`\n"
+                history_text += f"   🔗 {record['commit_sha'][:8]}...\n"
                 history_text += f"   📅 {record['created_at']}\n\n"
             
             keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(history_text, reply_markup=reply_markup, parse_mode='Markdown')
     
+    elif callback_data == 'stats_menu':
+        user_id = update.effective_user.id
+        stats = await db.get_user_stats(user_id)
+        
+        stats_text = (
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+            "┃  📈 Ваша статистика            ┃\n"
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+        )
+        
+        stats_text += f"✅ Подтверждено: **{stats['approved']}**\n"
+        stats_text += f"❌ Отклонено: **{stats['rejected']}**\n"
+        stats_text += f"🔍 Всего проверено: **{stats['total']}**\n\n"
+        
+        if stats['total'] > 0:
+            approval_ratio = (stats['approved'] / stats['total']) * 100
+            stats_text += f"📊 Процент одобрений: **{approval_ratio:.1f}%**\n\n"
+            
+            # Visual bar
+            bar_length = 20
+            filled = int((approval_ratio / 100) * bar_length)
+            bar = "█" * filled + "░" * (bar_length - filled)
+            stats_text += f"[{bar}]\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
+    
     elif callback_data == 'settings':
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            text="⚙️ *Настройки*\n\nИспользуйте /help для информации о конфигурации.",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+            "┃  ⚙️ Настройки                  ┃\n"
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+            "Используйте /help для информации о конфигурации.",
+            reply_markup=reply_markup
         )
     
     elif callback_data == 'back_to_menu':
         # Return to main menu
-        keyboard = [
-            [InlineKeyboardButton("🔍 Проверить коммит", callback_data='check_commit')],
-            [InlineKeyboardButton("✅ Подтвердить коммит", callback_data='approve_commit')],
-            [InlineKeyboardButton("❌ Отклонить коммит", callback_data='reject_commit')],
-            [InlineKeyboardButton("📊 История", callback_data='history')],
-            [InlineKeyboardButton("⚙️ Настройки", callback_data='settings')],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "🤖 *GitHub Commits Verifier Bot*\n\n"
-            "Главное меню. Выберите действие:",
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
+        await start(update, context)
     
     return ConversationHandler.END
 
 
-async def handle_commit_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def handle_confirm_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Handle commit action callbacks (approve/reject buttons from commit info)
+    Handle confirmation callbacks (confirm/cancel before saving)
     """
     query = update.callback_query
     callback_data = query.data
     
     try:
-        # Parse callback: approve_<sha> or reject_<sha>
-        if callback_data.startswith('approve_'):
-            commit_sha = callback_data.replace('approve_', '')
+        if callback_data.startswith('confirm_approve_'):
+            commit_sha = callback_data.replace('confirm_approve_', '')
             status = 'approved'
             status_emoji = '✅'
-        elif callback_data.startswith('reject_'):
-            commit_sha = callback_data.replace('reject_', '')
+        elif callback_data.startswith('confirm_reject_'):
+            commit_sha = callback_data.replace('confirm_reject_', '')
             status = 'rejected'
             status_emoji = '❌'
+        elif callback_data.startswith('cancel_action_'):
+            await query.answer("❌ Действие отменено", show_alert=False)
+            keyboard = [
+                [InlineKeyboardButton("🔍 Проверить еще", callback_data='check_commit')],
+                [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_menu')],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "⚠️ *Операция отменена*\n\nВы можете проверить другой коммит.",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            return ConversationHandler.END
         else:
             return ConversationHandler.END
         
-        await query.answer()
+        await query.answer(f"💾 Сохраняю коммит как {status}...", show_alert=False)
         
-        # Get repo from context (was stored during check_commit)
+        # Get repo from context
         repo = context.user_data.get('repo', 'unknown')
         user_id = update.effective_user.id
         
@@ -203,14 +250,25 @@ async def handle_commit_action_callback(update: Update, context: ContextTypes.DE
         )
         
         if success:
-            # Edit message with result
-            response_text = (
-                f"{status_emoji} *Коммит успешно обработан*\n\n"
-                f"📦 Репозиторий: `{repo}`\n"
-                f"🔗 SHA: `{commit_sha[:8]}...`\n"
-                f"📋 Статус: *{status.upper()}*\n\n"
-                f"{'🔐 Коммит одобрен' if status == 'approved' else '⚠️ Коммит отклонен'}"
-            )
+            # Create success message
+            if status == 'approved':
+                result_text = (
+                    "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+                    "┃  ✅ Коммит одобрен             ┃\n"
+                    "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+                    f"🔐 Статус: **ОДОБРЕН**\n\n"
+                )
+            else:
+                result_text = (
+                    "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+                    "┃  ❌ Коммит отклонен            ┃\n"
+                    "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+                    f"⚠️ Статус: **ОТКЛОНЕН**\n\n"
+                )
+            
+            result_text += f"📦 Репозиторий: `{repo}`\n"
+            result_text += f"🔗 SHA: `{commit_sha[:8]}...`\n"
+            result_text += f"✅ Сохранено в БД\n"
             
             keyboard = [
                 [InlineKeyboardButton("🔍 Проверить еще", callback_data='check_commit')],
@@ -219,17 +277,15 @@ async def handle_commit_action_callback(update: Update, context: ContextTypes.DE
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             await query.edit_message_text(
-                response_text,
+                result_text,
                 reply_markup=reply_markup,
                 parse_mode='Markdown'
             )
         else:
-            await query.edit_message_text(
-                "❌ Ошибка при сохранении. Попробуйте еще раз."
-            )
+            await query.answer("❌ Ошибка при сохранении!", show_alert=True)
     
     except Exception as e:
-        logger.error(f"Error in handle_commit_action_callback: {e}")
+        logger.error(f"Error in handle_confirm_action_callback: {e}")
         await query.answer(f"Ошибка: {str(e)}", show_alert=True)
     
     return ConversationHandler.END
@@ -241,24 +297,26 @@ async def handle_repo_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """
     repo_input = update.message.text.strip()
     
-    # Send typing indicator
     await update.message.chat.send_action(ChatAction.TYPING)
     
     try:
-        # Get repository info
         repo_info = await github_service.get_repository(repo_input)
         
         if repo_info:
             context.user_data['repo'] = repo_input
             await update.message.reply_text(
-                f"✅ Репозиторий найден: `{repo_info['full_name']}`\n\n"
+                f"✅ Репозиторий найден!\n\n"
+                f"📦 `{repo_info['full_name']}`\n"
+                f"⭐ Stars: {repo_info['stars']}\n"
+                f"💾 Language: {repo_info['language']}\n\n"
                 f"📌 Введите SHA коммита для проверки:",
                 parse_mode='Markdown'
             )
             return COMMIT_INPUT
         else:
             await update.message.reply_text(
-                "❌ Репозиторий не найден. Проверьте URL или имя в формате `owner/repo`",
+                "❌ Репозиторий не найден.\n\n"
+                "Проверьте URL или имя в формате `owner/repo`",
                 parse_mode='Markdown'
             )
             return REPO_INPUT
@@ -274,7 +332,6 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     """
     commit_sha = update.message.text.strip()
     
-    # Send typing indicator
     await update.message.chat.send_action(ChatAction.TYPING)
     
     action = context.user_data.get('action')
@@ -282,38 +339,41 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     try:
         if action == 'check_commit':
-            # Get commit info
             commit_info = await github_service.get_commit_info(repo, commit_sha)
             
             if commit_info:
                 context.user_data['commit_sha'] = commit_sha
                 
-                # Build commit details message
+                # Build detailed commit info
                 commit_details = (
-                    f"*🔍 Информация о коммите:*\n\n"
-                    f"📦 Репозиторий: `{commit_info['repo']}`\n"
-                    f"🔗 SHA: `{commit_info['sha']}`\n"
-                    f"👤 Автор: {commit_info['author']}\n"
-                    f"📧 Email: `{commit_info['author_email']}`\n"
-                    f"📅 Дата: {commit_info['date']}\n"
-                    f"📝 Сообщение: {commit_info['message']}\n\n"
+                    "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+                    "┃  🔍 Информация о коммите      ┃\n"
+                    "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
                 )
                 
-                # Add signature info
+                commit_details += f"📦 Репозиторий: `{commit_info['repo']}`\n"
+                commit_details += f"🔗 SHA: `{commit_info['sha']}`\n"
+                commit_details += f"👤 Автор: {commit_info['author']}\n"
+                commit_details += f"📧 Email: `{commit_info['author_email']}`\n"
+                commit_details += f"📅 Дата: {commit_info['date']}\n\n"
+                
+                # Commit message
+                commit_details += f"💬 Сообщение:\n`{commit_info['message']}`\n\n"
+                
+                # Signature status
                 signature_status = "🔐 Подписано GPG" if commit_info['verified'] else "⚠️ Не подписано"
                 commit_details += f"{signature_status}\n\n"
                 
                 # Verification checks
                 checks = await github_service.verify_commit(commit_info)
-                commit_details += f"*✓ Результаты проверки:*\n"
+                commit_details += "*✓ Результаты проверки:*\n"
                 for check_name, check_result in checks.items():
-                    status = "✅" if check_result else "⚠️"
+                    status = "✅" if check_result else "❌"
                     commit_details += f"{status} {check_name}\n"
                 
-                # Add link to commit
                 commit_details += f"\n[🔗 Открыть на GitHub]({commit_info['url']})"
                 
-                # Create action buttons
+                # Action buttons
                 keyboard = [
                     [InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve_{commit_sha}"),
                      InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{commit_sha}")],
@@ -330,54 +390,101 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 return ACTION_CONFIRM
             else:
                 await update.message.reply_text(
-                    f"❌ Коммит не найден. Проверьте SHA.\n\n"
-                    f"📌 Введите другой SHA или отправьте /start для главного меню.",
+                    f"❌ Коммит не найден.\n\n"
+                    f"📌 Введите другой SHA или отправьте /start",
                     parse_mode='Markdown'
                 )
                 return COMMIT_INPUT
         
         elif action in ['approve_commit', 'reject_commit']:
-            # Direct approval/rejection without checking first
+            # Show confirmation before saving
             status = 'approved' if action == 'approve_commit' else 'rejected'
             status_emoji = '✅' if status == 'approved' else '❌'
+            status_text = 'ОДОБРИТЬ' if status == 'approved' else 'ОТКЛОНИТЬ'
             
-            # Save to database
-            success = await db.add_verification(
-                user_id=update.effective_user.id,
-                repo=repo,
-                commit_sha=commit_sha,
-                status=status
+            confirm_text = (
+                f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+                f"┃  {status_emoji} Подтверждение         ┃\n"
+                f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+                f"Вы уверены, что хотите {status_text}\n"
+                f"этот коммит?\n\n"
+                f"📦 Репозиторий: `{repo}`\n"
+                f"🔗 SHA: `{commit_sha[:8]}...`\n\n"
+                f"⚠️ Это действие будет сохранено в БД!"
             )
             
-            if success:
-                response_text = (
-                    f"{status_emoji} *Коммит успешно обработан*\n\n"
-                    f"📦 Репозиторий: `{repo}`\n"
-                    f"🔗 SHA: `{commit_sha[:8]}...`\n"
-                    f"📋 Статус: *{status.upper()}*\n\n"
-                    f"{'🔐 Коммит одобрен' if status == 'approved' else '⚠️ Коммит отклонен'}"
-                )
-                
-                keyboard = [
-                    [InlineKeyboardButton("✅ Еще подтверждение", callback_data='approve_commit'),
-                     InlineKeyboardButton("❌ Еще отклонение", callback_data='reject_commit')],
-                    [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_menu')],
-                ]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                await update.message.reply_text(
-                    response_text,
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-            else:
-                await update.message.reply_text(
-                    "❌ Ошибка при сохранении коммита. Попробуйте еще раз."
-                )
+            keyboard = [
+                [InlineKeyboardButton(f"✅ Да, {status_text}", callback_data=f"confirm_{action.replace('_commit', '')}_{commit_sha}"),
+                 InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_action_{commit_sha}")],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await update.message.reply_text(
+                confirm_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            return CONFIRM_ACTION
     
     except Exception as e:
         logger.error(f"Error handling commit: {e}")
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+    
+    return ConversationHandler.END
+
+
+async def approve_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Handle approve/reject buttons from commit detail view
+    """
+    query = update.callback_query
+    callback_data = query.data
+    
+    try:
+        if callback_data.startswith('approve_'):
+            commit_sha = callback_data.replace('approve_', '')
+            status = 'approved'
+            status_text = 'ОДОБРИТЬ'
+        elif callback_data.startswith('reject_'):
+            commit_sha = callback_data.replace('reject_', '')
+            status = 'rejected'
+            status_text = 'ОТКЛОНИТЬ'
+        else:
+            return ConversationHandler.END
+        
+        await query.answer()
+        
+        repo = context.user_data.get('repo', 'unknown')
+        context.user_data['commit_sha'] = commit_sha
+        
+        # Show confirmation dialog
+        confirm_text = (
+            f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+            f"┃  {'✅' if status == 'approved' else '❌'} Подтверждение         ┃\n"
+            f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+            f"Вы уверены, что хотите {status_text}\n"
+            f"этот коммит?\n\n"
+            f"📦 Репозиторий: `{repo}`\n"
+            f"🔗 SHA: `{commit_sha[:8]}...`\n\n"
+            f"⚠️ Это действие будет сохранено в БД!"
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton(f"✅ Да, {status_text}", callback_data=f"confirm_{status}_{commit_sha}"),
+             InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_action_{commit_sha}")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            confirm_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return CONFIRM_ACTION
+    
+    except Exception as e:
+        logger.error(f"Error in approve_reject_callback: {e}")
+        await query.answer(f"Ошибка: {str(e)}", show_alert=True)
     
     return ConversationHandler.END
 
@@ -392,34 +499,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Show statistics
-    """
-    user_id = update.effective_user.id
-    stats = await db.get_user_stats(user_id)
-    
-    stats_text = (
-        f"*📊 Ваша статистика:*\n\n"
-        f"✅ Подтверждено: {stats['approved']}\n"
-        f"❌ Отклонено: {stats['rejected']}\n"
-        f"🔍 Всего проверено: {stats['total']}\n"
-    )
-    
-    # Calculate approval ratio
-    if stats['total'] > 0:
-        approval_ratio = (stats['approved'] / stats['total']) * 100
-        stats_text += f"\n📈 Процент одобрений: {approval_ratio:.1f}%"
-    
-    keyboard = [[InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_menu')]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    await update.message.reply_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
-
-
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Log the error and send a message to notify the developer
+    Log the error
     """
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
 
@@ -455,8 +537,11 @@ def main() -> None:
             REPO_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_repo_input)],
             COMMIT_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_commit_input)],
             ACTION_CONFIRM: [
-                CallbackQueryHandler(handle_commit_action_callback, pattern=r'^(approve|reject)_'),
+                CallbackQueryHandler(approve_reject_callback, pattern=r'^(approve|reject)_'),
                 CallbackQueryHandler(button_callback),
+            ],
+            CONFIRM_ACTION: [
+                CallbackQueryHandler(handle_confirm_action_callback, pattern=r'^(confirm|cancel)_'),
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
@@ -465,7 +550,6 @@ def main() -> None:
     # Add handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('help', help_command))
-    application.add_handler(CommandHandler('stats', stats_command))
     application.add_handler(conv_handler)
     application.add_error_handler(error_handler)
     
