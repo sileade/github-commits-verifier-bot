@@ -71,11 +71,50 @@ async def post_shutdown(app: Application) -> None:
     logger.info("Shutdown complete")
 
 
+async def get_user_repositories_status(github_token: str) -> dict:
+    """
+    Get user repositories with their status and last commit dates
+    """
+    try:
+        service = GitHubService(github_token)
+        repos = await service.get_user_repositories()
+        
+        status_info = {}
+        for repo in repos[:10]:  # Limit to 10 repos for display
+            try:
+                last_commit = await service.get_last_commit(repo['full_name'])
+                status_info[repo['full_name']] = {
+                    'name': repo['name'],
+                    'stars': repo.get('stargazers_count', 0),
+                    'language': repo.get('language', 'Unknown'),
+                    'url': repo['html_url'],
+                    'last_commit': last_commit,
+                    'private': repo.get('private', False),
+                }
+            except Exception as e:
+                logger.warning(f"Error getting last commit for {repo['full_name']}: {e}")
+                status_info[repo['full_name']] = {
+                    'name': repo['name'],
+                    'stars': repo.get('stargazers_count', 0),
+                    'language': repo.get('language', 'Unknown'),
+                    'url': repo['html_url'],
+                    'last_commit': None,
+                    'private': repo.get('private', False),
+                }
+        
+        return status_info
+    except Exception as e:
+        logger.error(f"Error getting user repositories: {e}")
+        return {}
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Start command handler - show main menu
+    Start command handler - show main menu with repository status
     """
     user_id = update.effective_user.id
+    github_token = os.getenv('GITHUB_TOKEN')
+    
     await db.add_user(user_id, update.effective_user.username or 'unknown')
     
     menu_text = (
@@ -84,8 +123,47 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
         "Добро пожаловать! Этот бот помогает проверять\n"
         "и подтверждать коммиты GitHub приложений.\n\n"
-        "Выберите действие ниже:"
     )
+    
+    # Add repository status if available
+    try:
+        repos_status = await get_user_repositories_status(github_token)
+        
+        if repos_status:
+            menu_text += "*📦 Ваши репозитории:*\n\n"
+            
+            for repo_full_name, repo_info in sorted(repos_status.items()):
+                # Emoji for language
+                lang_emoji = {
+                    'Python': '🐍',
+                    'JavaScript': '📜',
+                    'TypeScript': '📘',
+                    'Go': '🐹',
+                    'Rust': '🦀',
+                    'Java': '☕',
+                    'C++': '⚙️',
+                    'C#': '💎',
+                    'PHP': '🐘',
+                    'Ruby': '💎',
+                }.get(repo_info['language'], '📄')
+                
+                # Status indicator
+                privacy_emoji = '🔒' if repo_info['private'] else '🌐'
+                
+                menu_text += f"{privacy_emoji} *{repo_info['name']}*\n"
+                menu_text += f"  {lang_emoji} {repo_info['language']} | ⭐ {repo_info['stars']}\n"
+                
+                if repo_info['last_commit']:
+                    menu_text += f"  📅 Последний коммит: {repo_info['last_commit']}\n"
+                else:
+                    menu_text += f"  📅 Последний коммит: Не найден\n"
+                
+                menu_text += "\n"
+    except Exception as e:
+        logger.error(f"Error loading repositories status: {e}")
+        menu_text += "*⚠️ Не удалось загрузить статус репозиториев*\n\n"
+    
+    menu_text += "\n*Выберите действие ниже:*"
     
     keyboard = [
         [InlineKeyboardButton("🔍 Проверить коммит", callback_data='check_commit')],
@@ -118,7 +196,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "✅ Подтвердить коммит - отметить коммит как легитимный\n"
         "❌ Отклонить коммит - отметить коммит как подозрительный\n"
         "📊 История - просмотр истории проверок\n"
-        "📈 Статистика - ваша статистика проверок\n"
+        "📈 Статистика - ваша статистика проверок\n\n"
+        "*🤖 Главная страница теперь показывает:*\n"
+        "📦 Все ваши репозитории\n"
+        "📅 Дату последнего коммита\n"
+        "⭐ Количество звезд\n"
+        "💾 Язык программирования\n"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -421,7 +504,7 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 
                 # Files info
                 if files:
-                    commit_details += f"*🗁 Онсканыются {len(files)} файлов:*\n"
+                    commit_details += f"*🗁 Отсканыры {len(files)} файлов:*\n"
                     for file in files[:5]:  # Show first 5
                         status_emoji = {  
                             'added': '🆕',
