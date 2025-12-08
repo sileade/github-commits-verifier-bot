@@ -35,11 +35,40 @@ logger = logging.getLogger(__name__)
 # Conversation states
 REPO_INPUT, COMMIT_INPUT, ACTION_CONFIRM, CONFIRM_ACTION, EXPORT_ACTION, BRANCH_INPUT = range(6)
 
-# Database initialization
-db = Database()
-
-# GitHub service
+# Database and GitHub service (initialized at startup)
+db: Optional[Database] = None
 github_service: Optional[GitHubService] = None
+
+
+async def post_init(app: Application) -> None:
+    """
+    Initialize database and services after application startup
+    """
+    global db, github_service
+    
+    logger.info("Initializing services...")
+    
+    # Initialize database
+    db = Database()
+    await db.init()
+    
+    # Initialize GitHub service
+    github_token = os.getenv('GITHUB_TOKEN')
+    if not github_token:
+        raise ValueError("GITHUB_TOKEN not found in environment variables")
+    github_service = GitHubService(github_token)
+    
+    logger.info("Services initialized successfully")
+
+
+async def post_shutdown(app: Application) -> None:
+    """
+    Clean up resources on shutdown
+    """
+    global db
+    if db:
+        await db.close()
+    logger.info("Shutdown complete")
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -392,7 +421,7 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 
                 # Files info
                 if files:
-                    commit_details += f"*📁 Онсканыются {len(files)} файлов:*\n"
+                    commit_details += f"*🗁 Онсканыются {len(files)} файлов:*\n"
                     for file in files[:5]:  # Show first 5
                         status_emoji = {  
                             'added': '🆕',
@@ -555,22 +584,18 @@ def main() -> None:
     """
     Start the bot
     """
-    global github_service
-    
     # Get tokens from environment
     telegram_token = os.getenv('TELEGRAM_BOT_TOKEN')
-    github_token = os.getenv('GITHUB_TOKEN')
     
     if not telegram_token:
         raise ValueError("TELEGRAM_BOT_TOKEN not found in environment variables")
-    if not github_token:
-        raise ValueError("GITHUB_TOKEN not found in environment variables")
-    
-    # Initialize services
-    github_service = GitHubService(github_token)
     
     # Create application
     application = Application.builder().token(telegram_token).build()
+    
+    # Add post_init callback
+    application.post_init = post_init
+    application.post_shutdown = post_shutdown
     
     # Add conversation handler
     conv_handler = ConversationHandler(
