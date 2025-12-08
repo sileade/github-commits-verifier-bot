@@ -1,113 +1,70 @@
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: github-commits-postgres
     restart: unless-stopped
-    
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-github_verifier}
       POSTGRES_USER: ${POSTGRES_USER:-github_bot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password}
       PGDATA: /var/lib/postgresql/data/pgdata
-    
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    
     networks:
       - bot_network
-    
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-github_bot}"]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 10s
-    
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-    
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 512M
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 256M
-  
-  # Ollama Local LLM (For local AI analysis without OpenAI)
+
   ollama:
     image: ollama/ollama:latest
     container_name: ollama
     restart: unless-stopped
-    
-    # Uncomment below for GPU support (NVIDIA CUDA)
-    # runtime: nvidia
-    # environment:
-    #   - NVIDIA_VISIBLE_DEVICES=all
-    
     ports:
       - "11434:11434"
-    
     volumes:
       - ollama_data:/root/.ollama
-      - ./init-ollama.sh:/init-ollama.sh:ro
-    
     environment:
       OLLAMA_HOST: 0.0.0.0:11434
-    
     networks:
       - bot_network
-    
-    # Auto-pull model on startup
-    entrypoint: |
-      sh -c '
-        /bin/ollama serve &
-        sleep 10
-        MODEL=${LOCAL_MODEL:-mistral}
-        echo "🤖 Checking if model $$MODEL exists..."
-        if ! /usr/bin/ollama list | grep -q $$MODEL; then
-          echo "📥 Pulling model $$MODEL (this may take 5-15 minutes)..."
-          /usr/bin/ollama pull $$MODEL
-          if [ $$? -eq 0 ]; then
-            echo "✅ Model $$MODEL pulled successfully!"
-          else
-            echo "❌ Failed to pull model $$MODEL"
-            exit 1
-          fi
-        else
-          echo "✅ Model $$MODEL already exists"
-        fi
-        wait
-      '
-    
+    entrypoint: sh -c '/bin/ollama serve & sleep 10 && MODEL=$${LOCAL_MODEL:-mistral} && echo "Checking model $${MODEL}..." && if ! /usr/bin/ollama list | grep -q $${MODEL}; then echo "Pulling model $${MODEL}..." && /usr/bin/ollama pull $${MODEL}; else echo "Model $${MODEL} exists"; fi && wait'
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags > /dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
-    
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 8GB
         reservations:
-          cpus: '1'
+          cpus: "1"
           memory: 4GB
-  
-  # GitHub Commits Verifier Bot
+
   github-commits-bot:
     build:
       context: .
@@ -116,67 +73,49 @@ services:
         PYTHON_VERSION: "3.11"
     container_name: github-commits-verifier-bot
     restart: unless-stopped
-    
     depends_on:
       postgres:
         condition: service_healthy
       ollama:
         condition: service_started
-    
     env_file:
       - .env
-    
     environment:
-      # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-github_bot}:${POSTGRES_PASSWORD:-secure_password}@postgres:5432/${POSTGRES_DB:-github_verifier}
-      
-      # Local LLM (Ollama)
       OLLAMA_HOST: http://ollama:11434
       LOCAL_MODEL: ${LOCAL_MODEL:-mistral}
       USE_LOCAL_MODEL: ${USE_LOCAL_MODEL:-false}
-      
-      # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      
-      # Python
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
-    
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
-    
     networks:
       - bot_network
-    
     healthcheck:
       test: ["CMD-SHELL", "python -c 'print(\"Bot running\")' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "10m"
         max-file: "5"
-        labels: "service=github-commits-bot"
-    
+        labels: service=github-commits-bot
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 512M
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 256M
-    
     security_opt:
       - no-new-privileges:true
-    
     user: "1000:1000"
-    
     stop_grace_period: 30s
     stop_signal: SIGTERM
 
