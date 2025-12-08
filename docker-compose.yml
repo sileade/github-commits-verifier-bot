@@ -1,6 +1,65 @@
 version: '3.8'
 
 services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: github-commits-postgres
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-github_verifier}
+      POSTGRES_USER: ${POSTGRES_USER:-github_bot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    
+    # Volume mounts for data persistence
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    
+    # Network configuration
+    networks:
+      - bot_network
+    
+    # Port binding (only for local development)
+    ports:
+      - "5432:5432"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-github_bot} -d ${POSTGRES_DB:-github_verifier}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=postgres"
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Stop configuration
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+  
   # GitHub Commits Verifier Bot
   github-commits-bot:
     build:
@@ -11,21 +70,26 @@ services:
     container_name: github-commits-verifier-bot
     restart: unless-stopped
     
+    # Depends on PostgreSQL
+    depends_on:
+      postgres:
+        condition: service_healthy
+    
     # Environment variables from .env
     env_file:
       - .env
     
     environment:
-      # Override specific settings
-      DATABASE_PATH: /app/data/verifications.db
+      # Database configuration
+      DATABASE_URL: postgresql://${POSTGRES_USER:-github_bot}:${POSTGRES_PASSWORD:-secure_password}@postgres:5432/${POSTGRES_DB:-github_verifier}
+      # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Python
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
     
-    # Volume mounts for data persistence
+    # Volume mounts for logs
     volumes:
-      # Data directory for SQLite database
-      - ./data:/app/data
       # Logs directory
       - ./logs:/app/logs
       # Read-only access to .env (optional)
@@ -37,11 +101,11 @@ services:
     
     # Health check
     healthcheck:
-      test: ["CMD", "python", "-c", "import sqlite3; sqlite3.connect('/app/data/verifications.db')"]
+      test: ["CMD", "python", "-c", "import asyncio; from database import Database; db = Database(); asyncio.run(db.init())"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
     
     # Logging configuration
     logging:
@@ -82,9 +146,5 @@ networks:
 
 # Named volumes for persistent data
 volumes:
-  bot_data:
+  postgres_data:
     driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ./data
