@@ -37,6 +37,8 @@ Then start the bot:
 docker-compose up -d
 ```
 
+> **Note:** First startup will auto-download Mistral model (~5-15 minutes). Subsequent startups are instant! ⚡
+
 ---
 
 ## ✨ Key Features
@@ -55,10 +57,11 @@ docker-compose up -d
 |---------|---|---|
 | **Cost** | 💰 FREE | ~$0.0005 per analysis |
 | **Privacy** | 🔒 100% local | Cloud-based |
-| **Speed** | ⚡ 5-30 sec (CPU) or <2 sec (GPU) | 2-5 seconds |
+| **Speed** | ⚡ 5-30 sec (CPU) or <5 sec (GPU) | 2-5 seconds |
 | **Quality** | ⭐⭐⭐⭐ Good | ⭐⭐⭐⭐⭐ Excellent |
 | **Internet** | ❌ Not needed | ✅ Required |
-| **Setup** | 🐳 Docker + Ollama | 🔑 API key |
+| **Setup** | 🐳 Automatic with Docker | 🔑 API key |
+| **Auto Model Load** | ✅ Yes (Mistral) | N/A |
 
 **AI Features:**
 - **Smart Summaries** - AI generates brief summary of what changed
@@ -126,19 +129,21 @@ docker-compose up -d
 - Security hardening
 - Non-root user execution
 - Graceful shutdown
+- **Auto model loading for Ollama**
 
 ---
 
 ## 🤖 AI Analysis: Local vs Cloud
 
-### Option 1: Local LLM (FREE) 🏠
+### Option 1: Local LLM (FREE) 🏠 — **RECOMMENDED**
 
 **Best for:** Teams valuing privacy, cost, and offline capability
 
 ```bash
 # Quick setup (2 steps!)
-chmod +x setup-local-llm.sh
-./setup-local-llm.sh
+chmod +x setup.sh start.sh
+./setup.sh  # Select YES for Ollama
+./start.sh  # Auto-downloads Mistral on first run
 ```
 
 Features:
@@ -147,9 +152,10 @@ Features:
 - 🌐 **Offline capable** - no internet required
 - ⚡ **Fast with GPU** - <5 seconds per analysis
 - 🎯 **Customizable** - run Mistral, Llama2, Neural Chat, etc.
+- **✅ Auto-loads model on startup** - no manual steps needed!
 
-Models available:
-- **Mistral** (7B) - Recommended, fast + good quality
+Models available (auto-loadable):
+- **Mistral** (7B) - Recommended, fast + good quality **[AUTO-SELECTED]**
 - **Llama2** (7B/13B) - Best quality
 - **Neural Chat** (7B) - Optimized for chat
 - **Dolphin Mixtral** (8.7B) - Smart + fast
@@ -221,37 +227,36 @@ nvidia-smi          # если есть GPU
 ```bash
 git clone https://github.com/sileade/github-commits-verifier-bot.git
 cd github-commits-verifier-bot
+chmod +x setup.sh start.sh stop.sh restart.sh
 ```
 
 ### 3. Базовая конфигурация (.env)
-
-Запускаем:
 
 ```bash
 ./setup.sh
 ```
 
-Указываем:
-- `TELEGRAM_BOT_TOKEN` — токен бота от BotFather
-- `GITHUB_TOKEN` — PAT с правами `repo` + `read:user`
+**Скрипт спросит:**
+- `TELEGRAM_BOT_TOKEN` — от BotFather
+- `GITHUB_TOKEN` — Personal Access Token (repo + read:user)
+- `USE_LOCAL_MODEL` — **выбираешь YES**
+- `LOCAL_MODEL` — mistral (рекомендуется)
 
-Дальше **правим .env руками** под full-local режим:
+Дальше **руками добавляешь в .env:**
 
 ```env
-# AI: только локальная модель, без OpenAI
 USE_LOCAL_MODEL=true
 OLLAMA_HOST=http://ollama:11434
-LOCAL_MODEL=mistral     # или другая модель из OLLAMA_MODELS.md
-OPENAI_API_KEY=         # оставить пустым или удалить строку
+LOCAL_MODEL=mistral
+OPENAI_API_KEY=  # оставить пустым
 ```
 
 ### 4. Включаем GPU для Ollama (опционально, но сильно рекомендуется)
 
-В `docker-compose.yml` в сервисе `ollama` раскомментировать:
+В `docker-compose.yml` в сервисе `ollama` раскомментируешь:
 
 ```yaml
-ollama:
-  image: ollama/ollama:latest
+oollama:
   # ...
   runtime: nvidia
   environment:
@@ -260,50 +265,48 @@ ollama:
 
 > На хосте должен быть настроен `nvidia-container-toolkit`.
 
-### 5. Первый запуск (все автоматом)
+### 5. Первый запуск
 
 ```bash
-chmod +x start.sh stop.sh restart.sh
 ./start.sh
 ```
 
-Скрипт сам:
-- соберёт Docker-образ бота
-- поднимет PostgreSQL
-- поднимет Ollama
-- дождётся healthcheck'ов
-- **автоматически сделает `ollama pull <LOCAL_MODEL>`**, если модели ещё нет
+Скрипт **автоматически**:
+- ✅ проверит `.env`
+- ✅ соберёт Docker образ
+- ✅ поднимет PostgreSQL
+- ✅ поднимет Ollama
+- ✅ **автоматически скачает модель mistral** (5-15 минут)
+- ✅ запустит бота
+- ✅ дождётся healthcheck'ов
 
-### 6. Проверка, что всё живо
+### 6. Проверка что всё живо
 
 ```bash
 docker-compose ps
 
-# Логи бота
-docker-compose logs -f github-commits-bot
-
-# Логи ollama
-docker logs -f ollama
-
-# Список моделей
-docker exec ollama ollama list
+# Ожидаемое состояние:
+# github-commits-postgres       Up (healthy)
+# ollama                        Up (healthy)
+# github-commits-verifier-bot   Up (healthy)
 ```
 
-Ожидаемое состояние:
-- `github-commits-postgres` — Up (healthy)
-- `ollama` — Up (healthy), модель `mistral` в списке
-- `github-commits-verifier-bot` — Up (healthy)
+Логи:
+```bash
+docker logs -f ollama              # скачивание модели
+docker logs -f github-commits-bot   # логи бота
+```
 
 ### 7. Telegram
 
 - Открыть Telegram
 - Найти своего бота по username
 - Отправить `/start`
-- Проверить `/stats` и первую проверку коммита
+- Проверить первый коммит
 
 ### 8. Дальнейшая рутина
 
-Остановить весь стек:
+Остановить:
 ```bash
 ./stop.sh
 ```
@@ -313,7 +316,7 @@ docker exec ollama ollama list
 ./start.sh
 ```
 
-Перезапуск после обновления кода:
+Перебилдить (после обновления кода):
 ```bash
 git pull origin main
 ./restart.sh
@@ -323,12 +326,12 @@ git pull origin main
 
 ## 🛠️ Prerequisites
 
-- **Docker & Docker Compose** v3.8+
+- **Docker & Docker Compose** v3.8+ (auto-downloads Mistral)
 - **OpenSSL** (for password generation)
 - **Git**
 - **Telegram Bot Token** ([get from @BotFather](https://t.me/botfather))
 - **GitHub Personal Access Token** ([generate here](https://github.com/settings/tokens))
-- **OpenAI API Key** OR **Ollama** (one or both for AI analysis)
+- **OpenAI API Key** (optional, for cloud AI) OR **Ollama** (auto-loads model)
 
 ### Check Prerequisites
 
@@ -395,9 +398,9 @@ DATABASE_URL=postgresql://github_bot:password@postgres:5432/github_verifier
 # AI Analysis - Cloud (Optional)
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
-# AI Analysis - Local (Optional)
-USE_LOCAL_MODEL=false
-OLLAMA_HOST=http://localhost:11434
+# AI Analysis - Local (Auto-loads model)
+USE_LOCAL_MODEL=true
+OLLAMA_HOST=http://ollama:11434
 LOCAL_MODEL=mistral
 
 # Logging
@@ -434,26 +437,6 @@ LOG_LEVEL=INFO
 2. Click "Create new secret key"
 3. Copy the key
 4. Add to `.env`: `OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
-
-### Setup Local LLM (Ollama) (Optional)
-
-```bash
-# Automatic setup
-chmod +x setup-local-llm.sh
-./setup-local-llm.sh
-
-# Or manual:
-docker pull ollama/ollama
-docker run -d -p 11434:11434 -v ollama:/root/.ollama ollama/ollama
-docker exec ollama ollama pull mistral
-
-# Update .env
-USE_LOCAL_MODEL=true
-OLLAMA_HOST=http://localhost:11434
-LOCAL_MODEL=mistral
-```
-
-See [LOCAL_LLM_SETUP.md](LOCAL_LLM_SETUP.md) for detailed instructions.
 
 ---
 
@@ -516,6 +499,7 @@ docker-compose ps
 # Expected output:
 # NAME                              STATUS
 # github-commits-postgres  (healthy)
+# ollama                   (healthy)
 # github-commits-verifier-bot       (healthy)
 ```
 
@@ -524,6 +508,9 @@ docker-compose ps
 ```bash
 # Bot logs (real-time)
 docker-compose logs -f github-commits-bot
+
+# Ollama logs (model downloading)
+docker-compose logs -f ollama
 
 # Database logs
 docker-compose logs -f postgres
@@ -566,6 +553,9 @@ docker stats
 # Check database size
 docker exec postgres psql -U github_bot -d github_verifier \
   -c "SELECT pg_size_pretty(pg_database_size('github_verifier'));"
+
+# Check downloaded models in Ollama
+docker exec ollama ollama list
 ```
 
 ---
@@ -658,8 +648,9 @@ docker exec -i postgres psql -U github_bot github_verifier < backup.sql
 ```yaml
 Volumes:
   - postgres_data:/var/lib/postgresql/data  # Database persistence
-  - ./logs:/app/logs                         # Application logs
-  - ./.env:/app/.env:ro                     # Configuration (read-only)
+  - ollama_data:/root/.ollama               # Model cache (auto-loaded)
+  - ./logs:/app/logs                        # Application logs
+  - ./.env:/app/.env:ro                    # Configuration (read-only)
 ```
 
 ### Resource Limits
@@ -669,6 +660,9 @@ Resources:
   PostgreSQL:
     CPU limit: 1 core
     Memory limit: 512 MB
+  Ollama:
+    CPU limit: 2 cores
+    Memory limit: 8 GB
   Bot:
     CPU limit: 1 core
     Memory limit: 512 MB
@@ -683,36 +677,38 @@ github-commits-verifier-bot/
 ├── 📄 bot.py                    # Main bot application (450+ lines)
 ├── 📄 github_service.py         # GitHub API integration (300+ lines)
 ├── 📄 database.py               # PostgreSQL management (250+ lines)
-├── 📄 ai_analyzer.py            # OpenAI analysis (300+ lines) NEW!
-├── 📄 local_analyzer.py         # Local LLM analysis (300+ lines) NEW!
-├── 📄 hybrid_ai_manager.py      # AI manager (200+ lines) NEW!
-├── 📄 bot_ai_integration.py     # AI integration helpers (200+ lines) NEW!
+├── 📄 ai_analyzer.py            # OpenAI analysis (300+ lines)
+├── 📄 local_analyzer.py         # Local LLM analysis (300+ lines)
+├── 📄 hybrid_ai_manager.py      # AI manager (200+ lines)
+├── 📄 bot_ai_integration.py     # AI integration helpers (200+ lines)
 ├── 📄 requirements.txt          # Python dependencies
 ├── 🐳 Dockerfile                # Container definition
-├── 🐳 docker-compose.yml        # Services orchestration
+├── 🐳 docker-compose.yml        # Services orchestration (with auto model loading)
 ├── 📋 .env.example              # Configuration template
 ├── 📋 .env                      # Auto-generated configuration
 ├── 📋 README.md                 # This file
 ├── 📋 FEATURES_v3.md            # Detailed feature documentation
-├── 📋 ai_analyzer_integration.md # OpenAI integration guide NEW!
-├── 📋 local_analyzer_integration.md # Local LLM integration guide NEW!
-├── 📋 LOCAL_LLM_SETUP.md        # Complete Local LLM setup guide NEW!
-├── 📋 OLLAMA_MODELS.md          # Available models reference NEW!
+├── 📋 ai_analyzer_integration.md # OpenAI integration guide
+├── 📋 local_analyzer_integration.md # Local LLM integration guide
+├── 📋 LOCAL_LLM_SETUP.md        # Complete Local LLM setup guide
+├── 📋 OLLAMA_MODELS.md          # Available models reference
 ├── 📋 LICENSE                   # MIT License
 ├── 🚀 setup.sh                  # Automated setup script
-├── 🚀 quick-start.sh            # Quick start script
-├── 🚀 setup-local-llm.sh        # Local LLM setup script NEW!
-├── 🚀 test-local-llm.py         # Test local LLM setup NEW!
+├── 🚀 start.sh                  # Start script (with auto model loading)
+├── 🚀 stop.sh                   # Stop script
+├── 🚀 restart.sh                # Restart script
 ├── 📂 logs/
 │   └── bot.log                  # Application logs
 └── .gitignore
 
 🐳 Docker Services:
 ├── github-commits-postgres      # PostgreSQL 16 database
+├── ollama                       # Ollama with auto model loading
 └── github-commits-verifier-bot  # Main bot container
 
 💾 Docker Volumes:
-└── postgres_data                # Database persistence
+├── postgres_data                # Database persistence
+└── ollama_data                  # Model cache (auto-loaded on startup)
 ```
 
 ---
@@ -727,6 +723,7 @@ github-commits-verifier-bot/
 | "Permission denied" on setup.sh | Run: `chmod +x setup.sh` |
 | "PostgreSQL timeout" | Ensure Docker daemon is running, wait longer |
 | .env already exists | Choose to reconfigure in setup.sh prompt |
+| "version obsolete" warning | Ignore, it's a Docker Compose v2 info message |
 
 ### Bot Issues
 
@@ -736,8 +733,9 @@ github-commits-verifier-bot/
 | "Connection refused" | Check: `docker-compose ps` |
 | "GitHub API error" | Verify GITHUB_TOKEN has correct scopes |
 | Database errors | Check logs: `docker-compose logs postgres` |
-| "Ollama not available" | Make sure Ollama container is running: `docker ps` |
-| "Model not found" | Pull model: `docker exec ollama ollama pull mistral` |
+| "Ollama not available" | Check if Ollama container is running and healthy |
+| "Model not found" | Wait for auto-download or manual: `docker exec ollama ollama pull mistral` |
+| Ollama unhealthy | Check logs: `docker logs ollama`, wait for model to finish loading |
 
 ### AI Analysis Issues
 
@@ -747,6 +745,8 @@ github-commits-verifier-bot/
 | "OPENAI_API_KEY not found" | Add API key to .env or disable AI |
 | "Local LLM timeout" | Increase timeout in .env or use smaller model |
 | "Out of memory" | Use smaller model (openchat) or add more RAM |
+| "Model downloading forever" | Check internet connection, disk space |
+| Ollama model auto-load failed | Check docker logs: `docker logs -f ollama` |
 
 ### Health Checks
 
@@ -766,8 +766,8 @@ docker exec github-commits-bot python -c "print('Bot OK')"
 # View system logs
 docker-compose logs --tail=100 github-commits-bot
 
-# Test local LLM
-python test-local-llm.py
+# Test Ollama model loading
+docker exec ollama ollama list
 ```
 
 ---
@@ -783,6 +783,7 @@ git pull origin main
 # Rebuild image (includes new dependencies)
 docker-compose build --no-cache
 
+# Restart services
 docker-compose up -d
 ```
 
@@ -797,6 +798,20 @@ tar -czf backup-$(date +%Y%m%d).tar.gz backup-*.sql
 
 # Restore from backup
 docker exec -i postgres psql -U github_bot github_verifier < backup.sql
+```
+
+### Model Management
+
+```bash
+# Check current models
+docker exec ollama ollama list
+
+# Update/re-download model
+docker exec ollama ollama pull mistral
+
+# Switch to different model
+# Edit .env: LOCAL_MODEL=llama2
+# Restart: docker-compose restart
 ```
 
 ### Cleanup
@@ -824,7 +839,7 @@ rm -rf logs/ data/ .env
 - **[OLLAMA_MODELS.md](OLLAMA_MODELS.md)** - Available Ollama models reference
 - **[.env.example](.env.example)** - Configuration template with descriptions
 - **[Dockerfile](Dockerfile)** - Container build instructions
-- **[docker-compose.yml](docker-compose.yml)** - Services definition
+- **[docker-compose.yml](docker-compose.yml)** - Services definition with auto-loading
 
 ---
 
@@ -834,7 +849,8 @@ rm -rf logs/ data/ .env
 
 - **Commit Check:** 2-3 seconds
 - **Diff Retrieval:** 1-2 seconds (varies by size)
-- **AI Analysis (Local):** 5-30 sec (CPU) or <5 sec (GPU)
+- **AI Analysis (Local, CPU):** 5-30 seconds
+- **AI Analysis (Local, GPU):** <5 seconds ⚡
 - **AI Analysis (Cloud):** 3-5 seconds
 - **Export to Branch:** 3-5 seconds
 - **Database Query:** <100ms
@@ -845,6 +861,7 @@ rm -rf logs/ data/ .env
 - **PostgreSQL Container:** ~50-100 MB RAM
 - **Local LLM (7B model):** ~4GB RAM (CPU) or ~2GB VRAM (GPU)
 - **Database Size:** ~1 MB per 1000 verifications
+- **Model Cache:** ~4.4 GB (Mistral)
 
 ---
 
@@ -852,7 +869,8 @@ rm -rf logs/ data/ .env
 
 | Method | Setup | Cost/Analysis | Cost/1000 |
 |--------|-------|--|--|
-| **Local Ollama** | 10 min | $0 | $0 |
+| **Local Ollama (CPU)** | 10 min | $0 | $0 |
+| **Local Ollama (GPU)** | 10 min | $0 | $0 |
 | **OpenAI GPT-3.5** | 2 min | $0.0005 | $0.50 |
 | **OpenAI GPT-4** | 2 min | $0.03 | $30 |
 
@@ -913,7 +931,7 @@ copies or substantial portions of the Software.
 - [PyGithub](https://github.com/PyGithub/PyGithub) - GitHub Python Library
 - [asyncpg](https://github.com/MagicStack/asyncpg) - PostgreSQL Python Driver
 - [OpenAI](https://openai.com/) - Cloud AI Analysis
-- [Ollama](https://ollama.ai/) - Local LLM Support
+- [Ollama](https://ollama.ai/) - Local LLM Support with auto-loading
 - [Docker](https://www.docker.com/) - Containerization
 
 ---
