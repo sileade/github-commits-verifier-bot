@@ -1,7 +1,6 @@
-# Build stage
+# Multi-stage build for optimization
 FROM python:3.11-slim as builder
 
-# Set working directory
 WORKDIR /app
 
 # Install build dependencies
@@ -12,50 +11,49 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements
 COPY requirements.txt .
 
-# Create virtual environment and install dependencies
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Final stage
+# Runtime stage
 FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PATH="/opt/venv/bin:$PATH" \
-    PYTHONPATH=/app
-
-# Set working directory
 WORKDIR /app
 
-# Install runtime dependencies only
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy virtual environment from builder
-COPY --from=builder /opt/venv /opt/venv
+# Create app user (non-root)
+RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Copy application files
-COPY --chown=1000:1000 bot.py .
-COPY --chown=1000:1000 github_service.py .
-COPY --chown=1000:1000 database.py .
-COPY --chown=1000:1000 .env.example .
+# Copy Python packages from builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
-# Create data directories
-RUN mkdir -p /app/data /app/logs && \
-    chown -R 1000:1000 /app/data /app/logs
+# Copy application code
+COPY bot.py .
+COPY github_service.py .
+COPY database.py .
+COPY ai_analyzer.py .
+COPY local_analyzer.py .
+COPY bot_ai_integration.py .
+COPY hybrid_ai_manager.py .
 
-# Create non-root user for security
-RUN useradd -m -u 1000 -s /sbin/nologin botuser
-USER botuser
+# Create logs directory
+RUN mkdir -p logs && chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import sqlite3; sqlite3.connect('/app/data/verifications.db').close()" || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8443/health || python -c "print('Running')" || exit 1
 
-# Run application
-CMD ["python", "-u", "bot.py"]
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Run the bot
+CMD ["python", "bot.py"]

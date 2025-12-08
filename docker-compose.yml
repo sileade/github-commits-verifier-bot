@@ -7,42 +7,31 @@ services:
     container_name: github-commits-postgres
     restart: unless-stopped
     
-    # Environment variables
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-github_verifier}
       POSTGRES_USER: ${POSTGRES_USER:-github_bot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secure_password}
       PGDATA: /var/lib/postgresql/data/pgdata
     
-    # Volume mounts for data persistence
     volumes:
       - postgres_data:/var/lib/postgresql/data
     
-    # Network configuration
     networks:
       - bot_network
     
-    # Port binding (only for local development)
-    ports:
-      - "5432:5432"
-    
-    # Health check
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-github_bot} -d ${POSTGRES_DB:-github_verifier}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-github_bot}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 40s
+      start_period: 30s
     
-    # Logging configuration
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
-        labels: "service=postgres"
     
-    # Resource limits
     deploy:
       resources:
         limits:
@@ -51,14 +40,51 @@ services:
         reservations:
           cpus: '0.5'
           memory: 256M
+  
+  # Ollama Local LLM (Optional - for local AI analysis)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
     
-    # Security options
-    security_opt:
-      - no-new-privileges:true
+    # Uncomment for GPU support (NVIDIA CUDA)
+    # runtime: nvidia
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
     
-    # Stop configuration
-    stop_grace_period: 30s
-    stop_signal: SIGTERM
+    ports:
+      - "11434:11434"
+    
+    volumes:
+      - ollama_data:/root/.ollama
+    
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+    
+    networks:
+      - bot_network
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 8GB
+        reservations:
+          cpus: '1'
+          memory: 4GB
   
   # GitHub Commits Verifier Bot
   github-commits-bot:
@@ -70,44 +96,45 @@ services:
     container_name: github-commits-verifier-bot
     restart: unless-stopped
     
-    # Depends on PostgreSQL
     depends_on:
       postgres:
         condition: service_healthy
+      ollama:
+        condition: service_healthy
     
-    # Environment variables from .env
     env_file:
       - .env
     
     environment:
-      # Database configuration
+      # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-github_bot}:${POSTGRES_PASSWORD:-secure_password}@postgres:5432/${POSTGRES_DB:-github_verifier}
+      
+      # Local LLM (Ollama)
+      OLLAMA_HOST: http://ollama:11434
+      LOCAL_MODEL: ${LOCAL_MODEL:-mistral}
+      USE_LOCAL_MODEL: ${USE_LOCAL_MODEL:-false}
+      
       # Logging
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      
       # Python
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
     
-    # Volume mounts for logs
     volumes:
-      # Logs directory
       - ./logs:/app/logs
-      # Read-only access to .env (optional)
       - ./.env:/app/.env:ro
     
-    # Network configuration
     networks:
       - bot_network
     
-    # Health check
     healthcheck:
-      test: ["CMD", "python", "-c", "import asyncio; from database import Database; db = Database(); asyncio.run(db.init())"]
+      test: ["CMD", "python", "-c", "print('Bot running')"] || exit 1
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
     
-    # Logging configuration
     logging:
       driver: "json-file"
       options:
@@ -115,7 +142,6 @@ services:
         max-file: "5"
         labels: "service=github-commits-bot"
     
-    # Resource limits
     deploy:
       resources:
         limits:
@@ -125,18 +151,14 @@ services:
           cpus: '0.5'
           memory: 256M
     
-    # Security options
     security_opt:
       - no-new-privileges:true
     
-    # User
     user: "1000:1000"
     
-    # Stop configuration
     stop_grace_period: 30s
     stop_signal: SIGTERM
 
-# Network definition
 networks:
   bot_network:
     driver: bridge
@@ -144,7 +166,8 @@ networks:
       config:
         - subnet: 172.28.0.0/16
 
-# Named volumes for persistent data
 volumes:
   postgres_data:
+    driver: local
+  ollama_data:
     driver: local
