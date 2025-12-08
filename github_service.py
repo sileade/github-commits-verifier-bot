@@ -8,6 +8,7 @@ import logging
 import json
 from typing import Dict, Optional, List, Any
 from datetime import datetime
+import asyncio
 
 try:
     from github import Github, GithubException
@@ -26,15 +27,17 @@ class GitHubService:
     Service for GitHub API interactions
     """
     
-    def __init__(self, token: str):
+    def __init__(self, token: str, ollama_host: Optional[str] = None):
         """
         Initialize GitHub service
         
         Args:
             token: GitHub personal access token
+            ollama_host: Ollama API endpoint (optional)
         """
         self.token = token
         self.api_url = "https://api.github.com"
+        self.ollama_host = ollama_host or "http://localhost:11434"
         self.headers = {
             "Authorization": f"token {token}",
             "Accept": "application/vnd.github.v3+json",
@@ -88,6 +91,206 @@ class GitHubService:
             return None
         except ValueError as e:
             logger.error(f"Invalid repository format: {e}")
+            return None
+    
+    async def get_user_repositories(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get all user repositories
+        
+        Returns:
+            List of repository info or None
+        """
+        try:
+            url = f"{self.api_url}/user/repos"
+            response = requests.get(url, headers=self.headers, timeout=10, params={"per_page": 100})
+            response.raise_for_status()
+            
+            data = response.json()
+            repos = []
+            for repo in data:
+                repos.append({
+                    'full_name': repo['full_name'],
+                    'name': repo['name'],
+                    'url': repo['html_url'],
+                    'description': repo.get('description', ''),
+                    'stargazers_count': repo.get('stargazers_count', 0),
+                    'language': repo.get('language', 'Unknown'),
+                    'private': repo.get('private', False),
+                    'html_url': repo['html_url'],
+                })
+            return repos
+        except RequestException as e:
+            logger.error(f"Error fetching user repositories: {e}")
+            return None
+    
+    async def get_last_commit(self, repo_path: str) -> Optional[str]:
+        """
+        Get date of last commit
+        
+        Args:
+            repo_path: Repository path
+            
+        Returns:
+            Formatted date string or None
+        """
+        try:
+            if repo_path.startswith('http'):
+                parts = repo_path.rstrip('/').split('/')
+                owner, repo = parts[-2], parts[-1]
+            else:
+                owner, repo = repo_path.split('/')
+            
+            url = f"{self.api_url}/repos/{owner}/{repo}/commits"
+            response = requests.get(url, headers=self.headers, timeout=10, params={"per_page": 1})
+            response.raise_for_status()
+            
+            data = response.json()
+            if data:
+                commit_date = data[0]['commit']['author']['date']
+                # Parse and format date
+                dt = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            return None
+        except RequestException as e:
+            logger.error(f"Error fetching last commit: {e}")
+            return None
+    
+    async def get_commit_history(self, repo_path: str, limit: int = 50) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get commit history for a repository
+        
+        Args:
+            repo_path: Repository path
+            limit: Maximum number of commits to fetch (default 50, max 100 per API)
+            
+        Returns:
+            List of commits or None
+        """
+        try:
+            if repo_path.startswith('http'):
+                parts = repo_path.rstrip('/').split('/')
+                owner, repo = parts[-2], parts[-1]
+            else:
+                owner, repo = repo_path.split('/')
+            
+            url = f"{self.api_url}/repos/{owner}/{repo}/commits"
+            per_page = min(limit, 100)  # API max is 100
+            
+            commits = []
+            page = 1
+            
+            while len(commits) < limit:
+                response = requests.get(
+                    url,
+                    headers=self.headers,
+                    timeout=10,
+                    params={"per_page": per_page, "page": page}
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                if not data:
+                    break
+                
+                for commit in data:
+                    if len(commits) >= limit:
+                        break
+                    
+                    commit_data = commit['commit']
+                    commits.append({
+                        'sha': commit['sha'],
+                        'short_sha': commit['sha'][:8],
+                        'message': commit_data['message'],
+                        'author': commit_data['author']['name'],
+                        'author_email': commit_data['author']['email'],
+                        'date': commit_data['author']['date'],
+                        'url': commit['html_url'],
+                    })
+                
+                page += 1
+            
+            return commits
+        except RequestException as e:
+            logger.error(f"Error fetching commit history: {e}")
+            return None
+    
+    async def analyze_commits_with_ai(
+        self,
+        repo_path: str,
+        commits: List[Dict[str, Any]],
+        analysis_type: str = "summary"
+    ) -> Optional[str]:
+        """
+        Analyze commits using local AI (Ollama/Mistral)
+        
+        Args:
+            repo_path: Repository path
+            commits: List of commits to analyze
+            analysis_type: Type of analysis ('summary', 'quality', 'security', 'patterns')
+            
+        Returns:
+            AI analysis result or None
+        """
+        try:
+            # Prepare commit data for analysis
+            commits_text = "\n\n".join([
+                f"Commit: {c['short_sha']}\n"
+                f"Author: {c['author']}\n"
+                f"Date: {c['date']}\n"
+                f"Message: {c['message'][:200]}..."
+                for c in commits[:20]  # Analyze last 20 commits
+            ])
+            
+            # Create analysis prompt
+            prompts = {
+                "summary": f"""Analyze these commits from repository {repo_path}:
+
+{commits_text}
+
+Provide a brief summary of the development progress and key changes.""",
+                
+                "quality": f"""Analyze code quality based on these commit messages from {repo_path}:
+
+{commits_text}
+
+Assess commit quality, message clarity, and development practices.""",
+                
+                "security": f"""Analyze security-related commits from {repo_path}:
+
+{commits_text}
+
+Identify any security fixes, vulnerability patches, or security-related changes.""",
+                
+                "patterns": f"""Analyze development patterns from these commits in {repo_path}:
+
+{commits_text}
+
+Identify development patterns, release cycles, and work patterns.""",
+            }
+            
+            prompt = prompts.get(analysis_type, prompts["summary"])
+            
+            # Call Ollama API
+            response = requests.post(
+                f"{self.ollama_host}/api/generate",
+                json={
+                    "model": "mistral",
+                    "prompt": prompt,
+                    "stream": False,
+                    "temperature": 0.7,
+                    "top_p": 0.9,
+                },
+                timeout=60
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            return result.get("response", "").strip()
+        except RequestException as e:
+            logger.error(f"Error calling Ollama API: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Error analyzing commits with AI: {e}")
             return None
     
     async def get_commit_info(self, repo_path: str, commit_sha: str) -> Optional[Dict[str, Any]]:
