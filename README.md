@@ -5,10 +5,11 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue.svg)](https://www.docker.com/)
 [![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-blue.svg)](https://www.postgresql.org/)
 [![OpenAI](https://img.shields.io/badge/OpenAI-GPT%2D3.5-blue.svg)](https://openai.com/)
+[![Ollama](https://img.shields.io/badge/Ollama-LocalLLM-green.svg)](https://ollama.ai/)
 
-**Professional Telegram bot for verifying GitHub commits with AI-powered analysis, diff viewing, and code export to branches.**
+**Professional Telegram bot for verifying GitHub commits with AI-powered analysis (cloud or local), diff viewing, and code export to branches.**
 
-> Check commits, analyze with AI, view diffs, export code to branches—all from Telegram with one command setup!
+> Check commits, analyze with AI (free local or cloud), view diffs, export code to branches—all from Telegram with one command setup!
 
 ---
 
@@ -46,7 +47,20 @@ docker-compose up -d
 - Automatic legitimacy checks
 - Clickable GitHub links
 
-### 🤖 AI-Powered Analysis (NEW!)
+### 🤖 AI-Powered Analysis (Local or Cloud)
+
+**Choose your AI:**
+
+| Feature | Local (Ollama) 🏠 | Cloud (OpenAI) ☁️ |
+|---------|---|---|
+| **Cost** | 💰 FREE | ~$0.0005 per analysis |
+| **Privacy** | 🔒 100% local | Cloud-based |
+| **Speed** | ⚡ 5-30 sec (CPU) or <2 sec (GPU) | 2-5 seconds |
+| **Quality** | ⭐⭐⭐⭐ Good | ⭐⭐⭐⭐⭐ Excellent |
+| **Internet** | ❌ Not needed | ✅ Required |
+| **Setup** | 🐳 Docker + Ollama | 🔑 API key |
+
+**AI Features:**
 - **Smart Summaries** - AI generates brief summary of what changed
 - **Impact Assessment** - Understands how changes affect codebase
 - **Code Review** - Identifies strengths and concerns automatically
@@ -115,48 +129,71 @@ docker-compose up -d
 
 ---
 
-## 🤖 AI Analysis Features (Optional)
+## 🤖 AI Analysis: Local vs Cloud
 
-The bot optionally integrates with **OpenAI GPT-3.5 Turbo** for intelligent code analysis.
+### Option 1: Local LLM (FREE) 🏠
 
-### Setup AI Analysis
+**Best for:** Teams valuing privacy, cost, and offline capability
 
-1. **Get OpenAI API Key**
-   - Go to [OpenAI API Keys](https://platform.openai.com/api-keys)
-   - Create new secret key
-   - Copy the key
-
-2. **Add to .env**
-   ```env
-   OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-   ```
-
-3. **Rebuild Docker image**
-   ```bash
-   docker-compose build --no-cache
-   docker-compose up -d
-   ```
-
-### AI Analysis Output
-
-When viewing a commit, the bot shows:
-
-```
-🤖 AI Analysis:
-
-🆕 Summary: Refactored authentication module for better security and performance
-✏️ Impact: Affects login flow and session management across the app
-✅ Strengths: Good separation of concerns, comprehensive error handling
-⚠️ Concerns: Migration script needs testing with existing databases
-👨‍💻 Review: APPROVE - Well-structured changes with good documentation
+```bash
+# Quick setup (2 steps!)
+chmod +x setup-local-llm.sh
+./setup-local-llm.sh
 ```
 
-### Cost Considerations
+Features:
+- 💰 **Completely FREE** after initial setup
+- 🔒 **100% private** - no data leaves your servers
+- 🌐 **Offline capable** - no internet required
+- ⚡ **Fast with GPU** - <5 seconds per analysis
+- 🎯 **Customizable** - run Mistral, Llama2, Neural Chat, etc.
 
-- **GPT-3.5 Turbo**: ~$0.0005 per commit analysis (~$0.50 per 1000 commits)
-- **GPT-4**: ~$0.03 per commit analysis (10x more expensive)
+Models available:
+- **Mistral** (7B) - Recommended, fast + good quality
+- **Llama2** (7B/13B) - Best quality
+- **Neural Chat** (7B) - Optimized for chat
+- **Dolphin Mixtral** (8.7B) - Smart + fast
+- **OpenChat** (3.5B) - Ultra-light
 
-For cost efficiency, the bot uses GPT-3.5 Turbo by default.
+See [LOCAL_LLM_SETUP.md](LOCAL_LLM_SETUP.md) for detailed guide.
+
+### Option 2: Cloud (OpenAI) ☁️
+
+**Best for:** Teams wanting best quality without infrastructure
+
+```env
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Features:
+- 🎯 **Highest quality** - GPT-3.5 Turbo
+- ⚡ **Fastest** - 2-5 seconds per analysis
+- 🔧 **No setup** - just add API key
+- 📊 **Usage stats** - track costs easily
+
+Costs:
+- ~$0.0005 per analysis
+- ~$0.50 per 1000 commits
+- ~$5 per 10,000 commits
+
+See [ai_analyzer_integration.md](ai_analyzer_integration.md) for details.
+
+### Option 3: Hybrid (Smart) 🧠
+
+**Best for:** Cost-conscious teams wanting fallback
+
+```env
+# Use BOTH - bot auto-selects best option
+USE_LOCAL_MODEL=true
+OLLAMA_HOST=http://ollama:11434
+LOCAL_MODEL=mistral
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+Behavior:
+1. Try local Mistral first (instant, free)
+2. If slow/unavailable → fallback to OpenAI
+3. User never waits, never pays unnecessarily
 
 ---
 
@@ -167,7 +204,7 @@ For cost efficiency, the bot uses GPT-3.5 Turbo by default.
 - **Git**
 - **Telegram Bot Token** ([get from @BotFather](https://t.me/botfather))
 - **GitHub Personal Access Token** ([generate here](https://github.com/settings/tokens))
-- **OpenAI API Key** (optional, for AI analysis)
+- **OpenAI API Key** OR **Ollama** (one or both for AI analysis)
 
 ### Check Prerequisites
 
@@ -231,8 +268,13 @@ POSTGRES_USER=github_bot
 POSTGRES_PASSWORD=secure_random_password
 DATABASE_URL=postgresql://github_bot:password@postgres:5432/github_verifier
 
-# OpenAI Configuration (Optional)
+# AI Analysis - Cloud (Optional)
 OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# AI Analysis - Local (Optional)
+USE_LOCAL_MODEL=false
+OLLAMA_HOST=http://localhost:11434
+LOCAL_MODEL=mistral
 
 # Logging
 LOG_LEVEL=INFO
@@ -268,6 +310,26 @@ LOG_LEVEL=INFO
 2. Click "Create new secret key"
 3. Copy the key
 4. Add to `.env`: `OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`
+
+### Setup Local LLM (Ollama) (Optional)
+
+```bash
+# Automatic setup
+chmod +x setup-local-llm.sh
+./setup-local-llm.sh
+
+# Or manual:
+docker pull ollama/ollama
+docker run -d -p 11434:11434 -v ollama:/root/.ollama ollama/ollama
+docker exec ollama ollama pull mistral
+
+# Update .env
+USE_LOCAL_MODEL=true
+OLLAMA_HOST=http://localhost:11434
+LOCAL_MODEL=mistral
+```
+
+See [LOCAL_LLM_SETUP.md](LOCAL_LLM_SETUP.md) for detailed instructions.
 
 ---
 
@@ -457,7 +519,10 @@ docker exec -i postgres psql -U github_bot github_verifier < backup.sql
 |----------|-------------|----------|----------|
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot API token | Yes | - |
 | `GITHUB_TOKEN` | GitHub Personal Access Token | Yes | - |
-| `OPENAI_API_KEY` | OpenAI API key for AI analysis | No | - |
+| `OPENAI_API_KEY` | OpenAI API key for cloud AI analysis | No | - |
+| `USE_LOCAL_MODEL` | Enable local LLM (Ollama) | No | false |
+| `OLLAMA_HOST` | Ollama server URL | No | http://localhost:11434 |
+| `LOCAL_MODEL` | Local model name (mistral, llama2, etc) | No | mistral |
 | `DATABASE_URL` | PostgreSQL connection string | Auto | postgresql://github_bot:password@postgres:5432/github_verifier |
 | `POSTGRES_DB` | Database name | Auto | github_verifier |
 | `POSTGRES_USER` | Database user | Auto | github_bot |
@@ -494,7 +559,9 @@ github-commits-verifier-bot/
 ├── 📄 bot.py                    # Main bot application (450+ lines)
 ├── 📄 github_service.py         # GitHub API integration (300+ lines)
 ├── 📄 database.py               # PostgreSQL management (250+ lines)
-├── 📄 ai_analyzer.py            # AI analysis service (300+ lines) NEW!
+├── 📄 ai_analyzer.py            # OpenAI analysis (300+ lines) NEW!
+├── 📄 local_analyzer.py         # Local LLM analysis (300+ lines) NEW!
+├── 📄 hybrid_ai_manager.py      # AI manager (200+ lines) NEW!
 ├── 📄 bot_ai_integration.py     # AI integration helpers (200+ lines) NEW!
 ├── 📄 requirements.txt          # Python dependencies
 ├── 🐳 Dockerfile                # Container definition
@@ -503,10 +570,15 @@ github-commits-verifier-bot/
 ├── 📋 .env                      # Auto-generated configuration
 ├── 📋 README.md                 # This file
 ├── 📋 FEATURES_v3.md            # Detailed feature documentation
-├── 📋 ai_analyzer_integration.md # AI integration guide NEW!
+├── 📋 ai_analyzer_integration.md # OpenAI integration guide NEW!
+├── 📋 local_analyzer_integration.md # Local LLM integration guide NEW!
+├── 📋 LOCAL_LLM_SETUP.md        # Complete Local LLM setup guide NEW!
+├── 📋 OLLAMA_MODELS.md          # Available models reference NEW!
 ├── 📋 LICENSE                   # MIT License
 ├── 🚀 setup.sh                  # Automated setup script
 ├── 🚀 quick-start.sh            # Quick start script
+├── 🚀 setup-local-llm.sh        # Local LLM setup script NEW!
+├── 🚀 test-local-llm.py         # Test local LLM setup NEW!
 ├── 📂 logs/
 │   └── bot.log                  # Application logs
 └── .gitignore
@@ -540,8 +612,17 @@ github-commits-verifier-bot/
 | "Connection refused" | Check: `docker-compose ps` |
 | "GitHub API error" | Verify GITHUB_TOKEN has correct scopes |
 | Database errors | Check logs: `docker-compose logs postgres` |
-| AI analysis not working | Check OPENAI_API_KEY is set in .env |
-| "OPENAI_API_KEY not found" | AI is optional; set it in .env to enable |
+| "Ollama not available" | Make sure Ollama container is running: `docker ps` |
+| "Model not found" | Pull model: `docker exec ollama ollama pull mistral` |
+
+### AI Analysis Issues
+
+| Issue | Solution |
+|-------|----------|
+| "No AI analysis shown" | Set OPENAI_API_KEY or USE_LOCAL_MODEL=true |
+| "OPENAI_API_KEY not found" | Add API key to .env or disable AI |
+| "Local LLM timeout" | Increase timeout in .env or use smaller model |
+| "Out of memory" | Use smaller model (openchat) or add more RAM |
 
 ### Health Checks
 
@@ -552,14 +633,17 @@ docker-compose ps
 # Check PostgreSQL connectivity
 docker exec postgres pg_isready -U github_bot
 
+# Check Ollama (if using local LLM)
+curl http://localhost:11434/api/tags
+
 # Test bot connectivity
 docker exec github-commits-bot python -c "print('Bot OK')"
 
 # View system logs
 docker-compose logs --tail=100 github-commits-bot
 
-# Check AI initialization
-docker-compose logs github-commits-bot | grep -i "ai analysis"
+# Test local LLM
+python test-local-llm.py
 ```
 
 ---
@@ -611,56 +695,13 @@ rm -rf logs/ data/ .env
 ## 📚 Documentation
 
 - **[FEATURES_v3.md](FEATURES_v3.md)** - Detailed feature documentation
-- **[ai_analyzer_integration.md](ai_analyzer_integration.md)** - AI integration guide
+- **[ai_analyzer_integration.md](ai_analyzer_integration.md)** - Cloud AI (OpenAI) integration guide
+- **[local_analyzer_integration.md](local_analyzer_integration.md)** - Local AI (Ollama) integration guide
+- **[LOCAL_LLM_SETUP.md](LOCAL_LLM_SETUP.md)** - Complete local LLM setup guide
+- **[OLLAMA_MODELS.md](OLLAMA_MODELS.md)** - Available Ollama models reference
 - **[.env.example](.env.example)** - Configuration template with descriptions
 - **[Dockerfile](Dockerfile)** - Container build instructions
 - **[docker-compose.yml](docker-compose.yml)** - Services definition
-
----
-
-## 🚀 Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     Telegram User                                           │
-└─────────────────────────────────────────────────┬───────────────────────────┘
-                                                  │
-                                            Telegram API
-                                                  │
-                                                  ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│         GitHub Commits Verifier Bot (python-telegram-bot)                   │
-│                                                                              │
-│  • Conversation management (ConversationHandler)                            │
-│  • Command processing (CommandHandler)                                      │
-│  • Inline keyboards and callbacks                                           │
-│  • State machine (REPO_INPUT, COMMIT_INPUT, etc)                            │
-│  • AI Integration (async analysis calls)                                    │
-└─────────────────────────────────┬──────────────────────┬──────────────────────┘
-                                  │                      │
-                                  ▼                      ▼
-┌─────────────────────────────────────────────────┐    ┌──────────────────────────┐
-│  GitHub Service                                 │    │  Database (PostgreSQL)   │
-│                                                  │    │                          │
-│ • get_repository()                              │    │ • Users table            │
-│ • get_commit_info()                            │    │ • Verifications table    │
-│ • get_commit_files()                           │    │ • Indexes                │
-│ • get_commit_diff()                            │    │ • Audit trail            │
-│ • get_branches()                               │    └──────────────────────────┘
-│ • cherry_pick()                                │
-│ • verify_commit()                              │
-└─────────────┬──────────────────────────────────┘
-              │
-              ▼
-       GitHub REST API
-       (api.github.com)
-              │
-      ┌───────┴────────┐
-      ▼                ▼
-  OpenAI API    GitHub API
-  (GPT-3.5)     (Commits)
-    (AI)
-```
 
 ---
 
@@ -670,7 +711,8 @@ rm -rf logs/ data/ .env
 
 - **Commit Check:** 2-3 seconds
 - **Diff Retrieval:** 1-2 seconds (varies by size)
-- **AI Analysis:** 3-5 seconds (network-dependent)
+- **AI Analysis (Local):** 5-30 sec (CPU) or <2 sec (GPU)
+- **AI Analysis (Cloud):** 3-5 seconds
 - **Export to Branch:** 3-5 seconds
 - **Database Query:** <100ms
 
@@ -678,12 +720,24 @@ rm -rf logs/ data/ .env
 
 - **Bot Container:** ~150-200 MB RAM
 - **PostgreSQL Container:** ~50-100 MB RAM
+- **Local LLM (7B model):** ~4GB RAM (CPU) or ~2GB VRAM (GPU)
 - **Database Size:** ~1 MB per 1000 verifications
-- **AI Analysis:** No local resources, cloud-based
 
 ---
 
-## 👥 Contributing
+## 💰 Cost Comparison
+
+| Method | Setup | Cost/Analysis | Cost/1000 |
+|--------|-------|--|--|
+| **Local Ollama** | 10 min | $0 | $0 |
+| **OpenAI GPT-3.5** | 2 min | $0.0005 | $0.50 |
+| **OpenAI GPT-4** | 2 min | $0.03 | $30 |
+
+**💡 Local Ollama pays for itself after ~1000 commits!** 🎉
+
+---
+
+## 🤝 Contributing
 
 ### Bug Reports
 
@@ -735,7 +789,8 @@ copies or substantial portions of the Software.
 - [python-telegram-bot](https://github.com/python-telegram-bot/python-telegram-bot) - Telegram Bot Library
 - [PyGithub](https://github.com/PyGithub/PyGithub) - GitHub Python Library
 - [asyncpg](https://github.com/MagicStack/asyncpg) - PostgreSQL Python Driver
-- [OpenAI](https://openai.com/) - AI Analysis
+- [OpenAI](https://openai.com/) - Cloud AI Analysis
+- [Ollama](https://ollama.ai/) - Local LLM Support
 - [Docker](https://www.docker.com/) - Containerization
 
 ---
