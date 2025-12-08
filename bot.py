@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Telegram Bot for GitHub Commits Verification
-Проверка и подтверждение комитов приложений в GitHub
+Проверка и подтверждение коммитов приложений в GitHub
 """
 
 import os
@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Conversation states
-REPO_INPUT, COMMIT_INPUT, ACTION_CONFIRM, CONFIRM_ACTION, EXPORT_ACTION, BRANCH_INPUT = range(6)
+REPO_INPUT, COMMIT_INPUT, ACTION_CONFIRM, CONFIRM_ACTION, EXPORT_ACTION, BRANCH_INPUT, ANALYSIS_TYPE = range(7)
 
 # Database and GitHub service (initialized at startup)
 db: Optional[Database] = None
@@ -54,9 +54,10 @@ async def post_init(app: Application) -> None:
     
     # Initialize GitHub service
     github_token = os.getenv('GITHUB_TOKEN')
+    ollama_host = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
     if not github_token:
         raise ValueError("GITHUB_TOKEN not found in environment variables")
-    github_service = GitHubService(github_token)
+    github_service = GitHubService(github_token, ollama_host)
     
     logger.info("Services initialized successfully")
 
@@ -167,6 +168,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     keyboard = [
         [InlineKeyboardButton("🔍 Проверить коммит", callback_data='check_commit')],
+        [InlineKeyboardButton("📄 Анализ истории коммитов", callback_data='analyze_history')],
         [InlineKeyboardButton("✅ Подтвердить коммит", callback_data='approve_commit')],
         [InlineKeyboardButton("❌ Отклонить коммит", callback_data='reject_commit')],
         [InlineKeyboardButton("📊 История", callback_data='history')],
@@ -193,6 +195,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/stats - Статистика проверок\n\n"
         "*Основные функции:*\n"
         "🔍 Проверить коммит - просмотр информации о коммите\n"
+        "📄 Анализ истории - проанализировать последние коммиты с помощью AI\n"
         "✅ Подтвердить коммит - отметить коммит как легитимный\n"
         "❌ Отклонить коммит - отметить коммит как подозрительный\n"
         "📊 История - просмотр истории проверок\n"
@@ -201,7 +204,13 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "📦 Все ваши репозитории\n"
         "📅 Дату последнего коммита\n"
         "⭐ Количество звезд\n"
-        "💾 Язык программирования\n"
+        "💾 Язык программирования\n\n"
+        "*🤖 AI Анализ Коммитов:*\n"
+        "🐍 Локальная AI (Mistral) анализирует:\n"
+        "✅ Прогресс разработки\n"
+        "✅ Качество коммитов\n"
+        "✅ Основные паттерны\n"
+        "✅ Security-related исправления\n"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -222,6 +231,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             parse_mode='Markdown'
         )
         context.user_data['action'] = 'check_commit'
+        return REPO_INPUT
+    
+    elif callback_data == 'analyze_history':
+        await query.edit_message_text(
+            text="📄 Введите название репозитория (owner/repo)\n\nПример: `sileade/github-commits-verifier-bot`",
+            parse_mode='Markdown'
+        )
+        context.user_data['action'] = 'analyze_history'
         return REPO_INPUT
     
     elif callback_data == 'approve_commit':
@@ -316,153 +333,161 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ConversationHandler.END
 
 
-async def handle_show_diff(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Handle show diff callback
-    """
-    query = update.callback_query
-    
-    try:
-        callback_data = query.data
-        if callback_data.startswith('show_diff_'):
-            commit_sha = callback_data.replace('show_diff_', '')
-            repo = context.user_data.get('repo')
-            
-            if not repo:
-                await query.answer("❌ Не найден репозиторий", show_alert=True)
-                return ConversationHandler.END
-            
-            await query.answer("📄 Получаю дифф...")
-            
-            # Get diff
-            diff = await github_service.get_commit_diff(repo, commit_sha)
-            
-            if diff:
-                # If diff is too large, send as file
-                if len(diff) > 4000:
-                    # Create file
-                    file_bytes = diff.encode('utf-8')
-                    file_obj = BytesIO(file_bytes)
-                    file_obj.name = f"commit-{commit_sha[:8]}.patch"
-                    
-                    await query.message.reply_document(
-                        document=InputFile(file_obj, filename=file_obj.name),
-                        caption=f"📄 *Diff для commit:* `{commit_sha[:8]}...`\n\nФайл слишком большой, отправляю как документ.",
-                        parse_mode='Markdown'
-                    )
-                else:
-                    # Send as code block
-                    code_message = f"```diff\n{diff[:3900]}```" if len(diff) > 3900 else f"```diff\n{diff}```"
-                    await query.message.reply_text(
-                        f"📄 *Diff для commit:* `{commit_sha[:8]}...`\n\n{code_message}",
-                        parse_mode='Markdown'
-                    )
-            else:
-                await query.answer("❌ Ошибка получения диффа", show_alert=True)
-    
-    except Exception as e:
-        logger.error(f"Error in handle_show_diff: {e}")
-        await query.answer(f"Ошибка: {str(e)}", show_alert=True)
-    
-    return ConversationHandler.END
-
-
-async def handle_export_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Handle export code callback - show branch options
-    """
-    query = update.callback_query
-    
-    try:
-        callback_data = query.data
-        if callback_data.startswith('export_code_'):
-            commit_sha = callback_data.replace('export_code_', '')
-            context.user_data['export_commit_sha'] = commit_sha
-            
-            await query.answer()
-            
-            keyboard = [
-                [InlineKeyboardButton("📦 В существующую ветку", callback_data='export_existing')],
-                [InlineKeyboardButton("🌱 Создать новую ветку", callback_data='export_new')],
-                [InlineKeyboardButton("🔙 Назад", callback_data='back_to_commit')],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_text(
-                "📈 Выберите куда вынести изменения:",
-                reply_markup=reply_markup
-            )
-            return EXPORT_ACTION
-        
-        elif callback_data == 'export_existing':
-            await query.answer()
-            repo = context.user_data.get('repo')
-            
-            # Get branches
-            branches = await github_service.get_branches(repo)
-            
-            if branches:
-                branch_buttons = [[InlineKeyboardButton(f"🔗 {branch}", callback_data=f"select_branch_{branch}")] for branch in branches[:10]]
-                branch_buttons.append([InlineKeyboardButton("🔙 Назад", callback_data='export_code_' + context.user_data['export_commit_sha'])])
-                reply_markup = InlineKeyboardMarkup(branch_buttons)
-                
-                await query.edit_message_text(
-                    "📦 Выберите целевую ветку:",
-                    reply_markup=reply_markup
-                )
-                return EXPORT_ACTION
-            else:
-                await query.answer("❌ Не удалось получить ветки", show_alert=True)
-                return EXPORT_ACTION
-        
-        elif callback_data == 'export_new':
-            await query.answer()
-            await query.edit_message_text(
-                "🌱 Введите название новой ветки (e.g., `feature/new-feature`):"
-            )
-            context.user_data['export_action_type'] = 'new'
-            return BRANCH_INPUT
-    
-    except Exception as e:
-        logger.error(f"Error in handle_export_code: {e}")
-        await query.answer(f"Ошибка: {str(e)}", show_alert=True)
-    
-    return ConversationHandler.END
-
-
 async def handle_repo_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Handle repository input
     """
     repo_input = update.message.text.strip()
     
-    await update.message.chat.send_action(ChatAction.TYPING)
+    action = context.user_data.get('action')
+    
+    if action == 'analyze_history':
+        # Analyze commit history with AI
+        await update.message.chat.send_action(ChatAction.TYPING)
+        
+        try:
+            # Show loading message
+            msg = await update.message.reply_text(
+                f"📄 Загружаю историю коммитов из `{repo_input}`...\n\n"
+                f"Инициализация Mistral AI...",
+                parse_mode='Markdown'
+            )
+            
+            # Get commit history
+            commits = await github_service.get_commit_history(repo_input, limit=50)
+            
+            if not commits:
+                await msg.edit_text(
+                    f"❌ Не удалось получить историю коммитов."
+                )
+                return REPO_INPUT
+            
+            await msg.edit_text(
+                f"📄 Последние {len(commits)} коммитов загружены!\n\n"
+                f"🤖 Анализирую с помощью Mistral (may take 30-60 seconds)...",
+                parse_mode='Markdown'
+            )
+            
+            # Show analysis type menu
+            keyboard = [
+                [InlineKeyboardButton("📈 Обзор прогресса", callback_data='analyze_summary')],
+                [InlineKeyboardButton("✅ Оценка качества", callback_data='analyze_quality')],
+                [InlineKeyboardButton("🔐 Поиск Security фиксов", callback_data='analyze_security')],
+                [InlineKeyboardButton(📈 Выявление паттернов", callback_data='analyze_patterns')],
+                [InlineKeyboardButton("🔙 Отмена", callback_data='back_to_menu')],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            context.user_data['commits'] = commits
+            context.user_data['repo'] = repo_input
+            
+            await msg.edit_text(
+                f"📄 *На что вы хотите сосредоточить анализ?*",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            
+            return ANALYSIS_TYPE
+        except Exception as e:
+            logger.error(f"Error in analyze_history: {e}")
+            await msg.edit_text(f"❌ Ошибка: {str(e)}")
+            return REPO_INPUT
+    else:
+        # Original check_commit flow
+        await update.message.chat.send_action(ChatAction.TYPING)
+        
+        try:
+            repo_info = await github_service.get_repository(repo_input)
+            
+            if repo_info:
+                context.user_data['repo'] = repo_input
+                await update.message.reply_text(
+                    f"✅ Репозиторий найден!\n\n"
+                    f"📦 `{repo_info['full_name']}`\n"
+                    f"⭐ Stars: {repo_info['stars']}\n"
+                    f"💾 Language: {repo_info['language']}\n\n"
+                    f"📌 Введите SHA коммита для проверки:",
+                    parse_mode='Markdown'
+                )
+                return COMMIT_INPUT
+            else:
+                await update.message.reply_text(
+                    "❌ Репозиторий не найден.\n\n"
+                    "Проверьте URL или имя в формате `owner/repo`",
+                    parse_mode='Markdown'
+                )
+                return REPO_INPUT
+        except Exception as e:
+            logger.error(f"Error getting repository: {e}")
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            return REPO_INPUT
+
+
+async def handle_analysis_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Handle analysis type selection
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    callback_data = query.data
+    
+    # Map callback to analysis type
+    analysis_types = {
+        'analyze_summary': 'summary',
+        'analyze_quality': 'quality',
+        'analyze_security': 'security',
+        'analyze_patterns': 'patterns',
+    }
+    
+    if callback_data not in analysis_types:
+        return ANALYSIS_TYPE
+    
+    analysis_type = analysis_types[callback_data]
+    commits = context.user_data.get('commits', [])
+    repo = context.user_data.get('repo', '')
     
     try:
-        repo_info = await github_service.get_repository(repo_input)
+        await query.edit_message_text(
+            f"🤖 Провожу AI анализ... (цисло могут занять 30-60 секунд)\n\n"
+            f"📄 Тип: {analysis_type}\n"
+            f"📦 Репозиторий: `{repo}`\n"
+            f"д Коммитов: {len(commits)}",
+            parse_mode='Markdown'
+        )
         
-        if repo_info:
-            context.user_data['repo'] = repo_input
-            await update.message.reply_text(
-                f"✅ Репозиторий найден!\n\n"
-                f"📦 `{repo_info['full_name']}`\n"
-                f"⭐ Stars: {repo_info['stars']}\n"
-                f"💾 Language: {repo_info['language']}\n\n"
-                f"📌 Введите SHA коммита для проверки:",
-                parse_mode='Markdown'
-            )
-            return COMMIT_INPUT
+        # Call AI analysis
+        result = await github_service.analyze_commits_with_ai(repo, commits, analysis_type)
+        
+        if result:
+            # Format result
+            result_text = f"""
+🤖 *AI Анализ ({analysis_type})*
+📦 Репозиторий: `{repo}`
+📅 Коммитов: {len(commits)}
+
+*Результат:*
+
+{result}
+"""
+            
+            # If result is too long, send in parts
+            if len(result_text) > 4000:
+                await query.edit_message_text(
+                    result_text[:4000] + "\n\n... (результат обрезан)",
+                    parse_mode='Markdown'
+                )
+            else:
+                await query.edit_message_text(result_text, parse_mode='Markdown')
         else:
-            await update.message.reply_text(
-                "❌ Репозиторий не найден.\n\n"
-                "Проверьте URL или имя в формате `owner/repo`",
-                parse_mode='Markdown'
+            await query.edit_message_text(
+                "❌ Не удалось проанализировать (твердятся, что Оллама работает)"
             )
-            return REPO_INPUT
     except Exception as e:
-        logger.error(f"Error getting repository: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {str(e)}")
-        return REPO_INPUT
+        logger.error(f"Error in handle_analysis_type: {e}")
+        await query.edit_message_text(f"❌ Ошибка: {str(e)}")
+    
+    return ConversationHandler.END
 
 
 async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -535,8 +560,6 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 keyboard = [
                     [InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve_{commit_sha}"),
                      InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{commit_sha}")],
-                    [InlineKeyboardButton("📄 Показать diff", callback_data=f"show_diff_{commit_sha}"),
-                     InlineKeyboardButton("📈 Вынести код", callback_data=f"export_code_{commit_sha}")],
                     [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")],
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -555,95 +578,12 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                     parse_mode='Markdown'
                 )
                 return COMMIT_INPUT
-        
-        elif action in ['approve_commit', 'reject_commit']:
-            # Show confirmation before saving
-            status = 'approved' if action == 'approve_commit' else 'rejected'
-            status_emoji = '✅' if status == 'approved' else '❌'
-            status_text = 'ОДОБРИТЬ' if status == 'approved' else 'ОТКЛОНИТЬ'
-            
-            confirm_text = (
-                f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
-                f"┃  {status_emoji} Подтверждение         ┃\n"
-                f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-                f"Вы уверены, что хотите {status_text}\n"
-                f"этот коммит?\n\n"
-                f"📦 Репозиторий: `{repo}`\n"
-                f"🔗 SHA: `{commit_sha[:8]}...`\n\n"
-                f"⚠️ Это действие будет сохранено в БД!"
-            )
-            
-            keyboard = [
-                [InlineKeyboardButton(f"✅ Да, {status_text}", callback_data=f"confirm_{action.replace('_commit', '')}_{commit_sha}"),
-                 InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_action_{commit_sha}")],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await update.message.reply_text(
-                confirm_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-            return CONFIRM_ACTION
     
     except Exception as e:
         logger.error(f"Error handling commit: {e}")
         await update.message.reply_text(f"❌ Ошибка: {str(e)}")
     
     return ConversationHandler.END
-
-
-async def handle_branch_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Handle branch name input for export
-    """
-    branch_name = update.message.text.strip()
-    context.user_data['export_branch_name'] = branch_name
-    
-    export_type = context.user_data.get('export_action_type', 'existing')
-    
-    if export_type == 'new':
-        await update.message.reply_text(
-            "🌱 Выберите базовую ветку (main, master, develop):"
-        )
-    else:
-        # Perform cherry-pick
-        await _perform_export(update, context)
-    
-    return ConversationHandler.END
-
-
-async def _perform_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Helper to perform actual export/cherry-pick
-    """
-    try:
-        repo = context.user_data.get('repo')
-        commit_sha = context.user_data.get('export_commit_sha')
-        branch_name = context.user_data.get('export_branch_name')
-        
-        await update.message.chat.send_action(ChatAction.TYPING)
-        
-        # Perform cherry-pick
-        result = await github_service.cherry_pick_commit(repo, commit_sha, branch_name)
-        
-        if result:
-            await update.message.reply_text(
-                f"✅ *Коммит успешно вынесен!*\n\n"
-                f"🌱 Ветка: `{branch_name}`\n"
-                f"🔗 Новый commit: `{result[:8]}...`\n\n"
-                f"[🔗 Открыть ветку](https://github.com/{repo}/tree/{branch_name})",
-                parse_mode='Markdown',
-                disable_web_page_preview=True
-            )
-        else:
-            await update.message.reply_text(
-                f"❌ Ошибка при выносе коммита в ветку `{branch_name}`"
-            )
-    
-    except Exception as e:
-        logger.error(f"Error in _perform_export: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -690,16 +630,10 @@ def main() -> None:
             REPO_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_repo_input)],
             COMMIT_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_commit_input)],
             ACTION_CONFIRM: [
-                CallbackQueryHandler(handle_show_diff, pattern=r'^show_diff_'),
-                CallbackQueryHandler(handle_export_code, pattern=r'^export_'),
                 CallbackQueryHandler(button_callback),
             ],
-            EXPORT_ACTION: [
-                CallbackQueryHandler(handle_export_code, pattern=r'^export_|select_branch_'),
-            ],
-            BRANCH_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_branch_input)],
-            CONFIRM_ACTION: [
-                CallbackQueryHandler(button_callback),
+            ANALYSIS_TYPE: [
+                CallbackQueryHandler(handle_analysis_type),
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
