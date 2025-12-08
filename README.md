@@ -32,7 +32,7 @@ The setup script will:
 
 Then start the bot:
 ```bash
-./quick-start.sh
+./start.sh
 # or
 docker-compose up -d
 ```
@@ -194,6 +194,130 @@ Behavior:
 1. Try local Mistral first (instant, free)
 2. If slow/unavailable → fallback to OpenAI
 3. User never waits, never pays unnecessarily
+
+---
+
+## 🧩 Minimal Checklist for Full Local Setup (GPU, No OpenAI)
+
+> Оптимизировано под типичный стенд: Linux + Docker + NVIDIA GPU + домашний/офисный сервер.
+
+### 1. Хостовая машина
+
+- OS: Linux (Debian/Ubuntu/Proxmox LXC/VM)
+- Docker + Docker Compose установлены
+- NVIDIA драйвера и nvidia-container-toolkit (для GPU)
+- ОЗУ: от 8 ГБ (лучше 16+)
+- VRAM: от 4 ГБ (для 7B модели) или 8+ ГБ (для 13B)
+
+Проверка:
+```bash
+docker --version
+docker-compose --version
+nvidia-smi          # если есть GPU
+```
+
+### 2. Клонируем репозиторий
+
+```bash
+git clone https://github.com/sileade/github-commits-verifier-bot.git
+cd github-commits-verifier-bot
+```
+
+### 3. Базовая конфигурация (.env)
+
+Запускаем:
+
+```bash
+./setup.sh
+```
+
+Указываем:
+- `TELEGRAM_BOT_TOKEN` — токен бота от BotFather
+- `GITHUB_TOKEN` — PAT с правами `repo` + `read:user`
+
+Дальше **правим .env руками** под full-local режим:
+
+```env
+# AI: только локальная модель, без OpenAI
+USE_LOCAL_MODEL=true
+OLLAMA_HOST=http://ollama:11434
+LOCAL_MODEL=mistral     # или другая модель из OLLAMA_MODELS.md
+OPENAI_API_KEY=         # оставить пустым или удалить строку
+```
+
+### 4. Включаем GPU для Ollama (опционально, но сильно рекомендуется)
+
+В `docker-compose.yml` в сервисе `ollama` раскомментировать:
+
+```yaml
+ollama:
+  image: ollama/ollama:latest
+  # ...
+  runtime: nvidia
+  environment:
+    - NVIDIA_VISIBLE_DEVICES=all
+```
+
+> На хосте должен быть настроен `nvidia-container-toolkit`.
+
+### 5. Первый запуск (все автоматом)
+
+```bash
+chmod +x start.sh stop.sh restart.sh
+./start.sh
+```
+
+Скрипт сам:
+- соберёт Docker-образ бота
+- поднимет PostgreSQL
+- поднимет Ollama
+- дождётся healthcheck'ов
+- **автоматически сделает `ollama pull <LOCAL_MODEL>`**, если модели ещё нет
+
+### 6. Проверка, что всё живо
+
+```bash
+docker-compose ps
+
+# Логи бота
+docker-compose logs -f github-commits-bot
+
+# Логи ollama
+docker logs -f ollama
+
+# Список моделей
+docker exec ollama ollama list
+```
+
+Ожидаемое состояние:
+- `github-commits-postgres` — Up (healthy)
+- `ollama` — Up (healthy), модель `mistral` в списке
+- `github-commits-verifier-bot` — Up (healthy)
+
+### 7. Telegram
+
+- Открыть Telegram
+- Найти своего бота по username
+- Отправить `/start`
+- Проверить `/stats` и первую проверку коммита
+
+### 8. Дальнейшая рутина
+
+Остановить весь стек:
+```bash
+./stop.sh
+```
+
+Запустить снова:
+```bash
+./start.sh
+```
+
+Перезапуск после обновления кода:
+```bash
+git pull origin main
+./restart.sh
+```
 
 ---
 
@@ -659,7 +783,6 @@ git pull origin main
 # Rebuild image (includes new dependencies)
 docker-compose build --no-cache
 
-# Restart services
 docker-compose up -d
 ```
 
@@ -711,7 +834,7 @@ rm -rf logs/ data/ .env
 
 - **Commit Check:** 2-3 seconds
 - **Diff Retrieval:** 1-2 seconds (varies by size)
-- **AI Analysis (Local):** 5-30 sec (CPU) or <2 sec (GPU)
+- **AI Analysis (Local):** 5-30 sec (CPU) or <5 sec (GPU)
 - **AI Analysis (Cloud):** 3-5 seconds
 - **Export to Branch:** 3-5 seconds
 - **Database Query:** <100ms
