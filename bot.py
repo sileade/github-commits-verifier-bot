@@ -8,8 +8,9 @@ import os
 import logging
 from datetime import datetime
 from typing import Optional
+from io import BytesIO
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -32,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Conversation states
-REPO_INPUT, COMMIT_INPUT, ACTION_CONFIRM, CONFIRM_ACTION = range(4)
+REPO_INPUT, COMMIT_INPUT, ACTION_CONFIRM, CONFIRM_ACTION, EXPORT_ACTION, BRANCH_INPUT = range(6)
 
 # Database initialization
 db = Database()
@@ -203,89 +204,115 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ConversationHandler.END
 
 
-async def handle_confirm_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def handle_show_diff(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Handle confirmation callbacks (confirm/cancel before saving)
+    Handle show diff callback
     """
     query = update.callback_query
-    callback_data = query.data
     
     try:
-        if callback_data.startswith('confirm_approve_'):
-            commit_sha = callback_data.replace('confirm_approve_', '')
-            status = 'approved'
-            status_emoji = '✅'
-        elif callback_data.startswith('confirm_reject_'):
-            commit_sha = callback_data.replace('confirm_reject_', '')
-            status = 'rejected'
-            status_emoji = '❌'
-        elif callback_data.startswith('cancel_action_'):
-            await query.answer("❌ Действие отменено", show_alert=False)
-            keyboard = [
-                [InlineKeyboardButton("🔍 Проверить еще", callback_data='check_commit')],
-                [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_menu')],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "⚠️ *Операция отменена*\n\nВы можете проверить другой коммит.",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-            return ConversationHandler.END
-        else:
-            return ConversationHandler.END
-        
-        await query.answer(f"💾 Сохраняю коммит как {status}...", show_alert=False)
-        
-        # Get repo from context
-        repo = context.user_data.get('repo', 'unknown')
-        user_id = update.effective_user.id
-        
-        # Save to database
-        success = await db.add_verification(
-            user_id=user_id,
-            repo=repo,
-            commit_sha=commit_sha,
-            status=status
-        )
-        
-        if success:
-            # Create success message
-            if status == 'approved':
-                result_text = (
-                    "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
-                    "┃  ✅ Коммит одобрен             ┃\n"
-                    "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-                    f"🔐 Статус: **ОДОБРЕН**\n\n"
-                )
+        callback_data = query.data
+        if callback_data.startswith('show_diff_'):
+            commit_sha = callback_data.replace('show_diff_', '')
+            repo = context.user_data.get('repo')
+            
+            if not repo:
+                await query.answer("❌ Не найден репозиторий", show_alert=True)
+                return ConversationHandler.END
+            
+            await query.answer("📄 Получаю дифф...")
+            
+            # Get diff
+            diff = await github_service.get_commit_diff(repo, commit_sha)
+            
+            if diff:
+                # If diff is too large, send as file
+                if len(diff) > 4000:
+                    # Create file
+                    file_bytes = diff.encode('utf-8')
+                    file_obj = BytesIO(file_bytes)
+                    file_obj.name = f"commit-{commit_sha[:8]}.patch"
+                    
+                    await query.message.reply_document(
+                        document=InputFile(file_obj, filename=file_obj.name),
+                        caption=f"📄 *Diff для commit:* `{commit_sha[:8]}...`\n\nФайл слишком большой, отправляю как документ.",
+                        parse_mode='Markdown'
+                    )
+                else:
+                    # Send as code block
+                    code_message = f"```diff\n{diff[:3900]}```" if len(diff) > 3900 else f"```diff\n{diff}```"
+                    await query.message.reply_text(
+                        f"📄 *Diff для commit:* `{commit_sha[:8]}...`\n\n{code_message}",
+                        parse_mode='Markdown'
+                    )
             else:
-                result_text = (
-                    "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
-                    "┃  ❌ Коммит отклонен            ┃\n"
-                    "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-                    f"⚠️ Статус: **ОТКЛОНЕН**\n\n"
-                )
-            
-            result_text += f"📦 Репозиторий: `{repo}`\n"
-            result_text += f"🔗 SHA: `{commit_sha[:8]}...`\n"
-            result_text += f"✅ Сохранено в БД\n"
-            
-            keyboard = [
-                [InlineKeyboardButton("🔍 Проверить еще", callback_data='check_commit')],
-                [InlineKeyboardButton("🔙 Главное меню", callback_data='back_to_menu')],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            await query.edit_message_text(
-                result_text,
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        else:
-            await query.answer("❌ Ошибка при сохранении!", show_alert=True)
+                await query.answer("❌ Ошибка получения диффа", show_alert=True)
     
     except Exception as e:
-        logger.error(f"Error in handle_confirm_action_callback: {e}")
+        logger.error(f"Error in handle_show_diff: {e}")
+        await query.answer(f"Ошибка: {str(e)}", show_alert=True)
+    
+    return ConversationHandler.END
+
+
+async def handle_export_code(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Handle export code callback - show branch options
+    """
+    query = update.callback_query
+    
+    try:
+        callback_data = query.data
+        if callback_data.startswith('export_code_'):
+            commit_sha = callback_data.replace('export_code_', '')
+            context.user_data['export_commit_sha'] = commit_sha
+            
+            await query.answer()
+            
+            keyboard = [
+                [InlineKeyboardButton("📦 В существующую ветку", callback_data='export_existing')],
+                [InlineKeyboardButton("🌱 Создать новую ветку", callback_data='export_new')],
+                [InlineKeyboardButton("🔙 Назад", callback_data='back_to_commit')],
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                "📈 Выберите куда вынести изменения:",
+                reply_markup=reply_markup
+            )
+            return EXPORT_ACTION
+        
+        elif callback_data == 'export_existing':
+            await query.answer()
+            repo = context.user_data.get('repo')
+            
+            # Get branches
+            branches = await github_service.get_branches(repo)
+            
+            if branches:
+                branch_buttons = [[InlineKeyboardButton(f"🔗 {branch}", callback_data=f"select_branch_{branch}")] for branch in branches[:10]]
+                branch_buttons.append([InlineKeyboardButton("🔙 Назад", callback_data='export_code_' + context.user_data['export_commit_sha'])])
+                reply_markup = InlineKeyboardMarkup(branch_buttons)
+                
+                await query.edit_message_text(
+                    "📦 Выберите целевую ветку:",
+                    reply_markup=reply_markup
+                )
+                return EXPORT_ACTION
+            else:
+                await query.answer("❌ Не удалось получить ветки", show_alert=True)
+                return EXPORT_ACTION
+        
+        elif callback_data == 'export_new':
+            await query.answer()
+            await query.edit_message_text(
+                "🌱 Введите название новой ветки (e.g., `feature/new-feature`):"
+            )
+            context.user_data['export_action_type'] = 'new'
+            return BRANCH_INPUT
+    
+    except Exception as e:
+        logger.error(f"Error in handle_export_code: {e}")
         await query.answer(f"Ошибка: {str(e)}", show_alert=True)
     
     return ConversationHandler.END
@@ -344,6 +371,9 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
             if commit_info:
                 context.user_data['commit_sha'] = commit_sha
                 
+                # Get files info
+                files = await github_service.get_commit_files(repo, commit_sha)
+                
                 # Build detailed commit info
                 commit_details = (
                     "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
@@ -359,6 +389,22 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 
                 # Commit message
                 commit_details += f"💬 Сообщение:\n`{commit_info['message']}`\n\n"
+                
+                # Files info
+                if files:
+                    commit_details += f"*📁 Онсканыются {len(files)} файлов:*\n"
+                    for file in files[:5]:  # Show first 5
+                        status_emoji = {  
+                            'added': '🆕',
+                            'modified': '✍️',
+                            'removed': '❌',
+                            'renamed': '📄',
+                            'copied': '📃',
+                        }.get(file['status'], '📄')
+                        commit_details += f"{status_emoji} {file['filename']} (+{file['additions']}/-{file['deletions']})\n"
+                    if len(files) > 5:
+                        commit_details += f"... и еще {len(files) - 5} файлов\n"
+                    commit_details += "\n"
                 
                 # Signature status
                 signature_status = "🔐 Подписано GPG" if commit_info['verified'] else "⚠️ Не подписано"
@@ -377,6 +423,8 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 keyboard = [
                     [InlineKeyboardButton("✅ Подтвердить", callback_data=f"approve_{commit_sha}"),
                      InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{commit_sha}")],
+                    [InlineKeyboardButton("📄 Показать diff", callback_data=f"show_diff_{commit_sha}"),
+                     InlineKeyboardButton("📈 Вынести код", callback_data=f"export_code_{commit_sha}")],
                     [InlineKeyboardButton("🔙 Главное меню", callback_data="back_to_menu")],
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
@@ -433,60 +481,57 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
-async def approve_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def handle_branch_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Handle approve/reject buttons from commit detail view
+    Handle branch name input for export
     """
-    query = update.callback_query
-    callback_data = query.data
+    branch_name = update.message.text.strip()
+    context.user_data['export_branch_name'] = branch_name
     
-    try:
-        if callback_data.startswith('approve_'):
-            commit_sha = callback_data.replace('approve_', '')
-            status = 'approved'
-            status_text = 'ОДОБРИТЬ'
-        elif callback_data.startswith('reject_'):
-            commit_sha = callback_data.replace('reject_', '')
-            status = 'rejected'
-            status_text = 'ОТКЛОНИТЬ'
-        else:
-            return ConversationHandler.END
-        
-        await query.answer()
-        
-        repo = context.user_data.get('repo', 'unknown')
-        context.user_data['commit_sha'] = commit_sha
-        
-        # Show confirmation dialog
-        confirm_text = (
-            f"┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
-            f"┃  {'✅' if status == 'approved' else '❌'} Подтверждение         ┃\n"
-            f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-            f"Вы уверены, что хотите {status_text}\n"
-            f"этот коммит?\n\n"
-            f"📦 Репозиторий: `{repo}`\n"
-            f"🔗 SHA: `{commit_sha[:8]}...`\n\n"
-            f"⚠️ Это действие будет сохранено в БД!"
-        )
-        
-        keyboard = [
-            [InlineKeyboardButton(f"✅ Да, {status_text}", callback_data=f"confirm_{status}_{commit_sha}"),
-             InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_action_{commit_sha}")],
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            confirm_text,
-            reply_markup=reply_markup,
-            parse_mode='Markdown'
-        )
-        return CONFIRM_ACTION
+    export_type = context.user_data.get('export_action_type', 'existing')
     
-    except Exception as e:
-        logger.error(f"Error in approve_reject_callback: {e}")
-        await query.answer(f"Ошибка: {str(e)}", show_alert=True)
+    if export_type == 'new':
+        await update.message.reply_text(
+            "🌱 Выберите базовую ветку (main, master, develop):"
+        )
+    else:
+        # Perform cherry-pick
+        await _perform_export(update, context)
     
     return ConversationHandler.END
+
+
+async def _perform_export(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Helper to perform actual export/cherry-pick
+    """
+    try:
+        repo = context.user_data.get('repo')
+        commit_sha = context.user_data.get('export_commit_sha')
+        branch_name = context.user_data.get('export_branch_name')
+        
+        await update.message.chat.send_action(ChatAction.TYPING)
+        
+        # Perform cherry-pick
+        result = await github_service.cherry_pick_commit(repo, commit_sha, branch_name)
+        
+        if result:
+            await update.message.reply_text(
+                f"✅ *Коммит успешно вынесен!*\n\n"
+                f"🌱 Ветка: `{branch_name}`\n"
+                f"🔗 Новый commit: `{result[:8]}...`\n\n"
+                f"[🔗 Открыть ветку](https://github.com/{repo}/tree/{branch_name})",
+                parse_mode='Markdown',
+                disable_web_page_preview=True
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ Ошибка при выносе коммита в ветку `{branch_name}`"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error in _perform_export: {e}")
+        await update.message.reply_text(f"❌ Ошибка: {str(e)}")
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -501,7 +546,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Log the error
+    Log errors
     """
     logger.error(msg="Exception while handling an update:", exc_info=context.error)
 
@@ -537,11 +582,16 @@ def main() -> None:
             REPO_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_repo_input)],
             COMMIT_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_commit_input)],
             ACTION_CONFIRM: [
-                CallbackQueryHandler(approve_reject_callback, pattern=r'^(approve|reject)_'),
+                CallbackQueryHandler(handle_show_diff, pattern=r'^show_diff_'),
+                CallbackQueryHandler(handle_export_code, pattern=r'^export_'),
                 CallbackQueryHandler(button_callback),
             ],
+            EXPORT_ACTION: [
+                CallbackQueryHandler(handle_export_code, pattern=r'^export_|select_branch_'),
+            ],
+            BRANCH_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_branch_input)],
             CONFIRM_ACTION: [
-                CallbackQueryHandler(handle_confirm_action_callback, pattern=r'^(confirm|cancel)_'),
+                CallbackQueryHandler(button_callback),
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
