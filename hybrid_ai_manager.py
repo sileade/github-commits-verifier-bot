@@ -221,9 +221,9 @@ class HybridAIManager:
         mode = mode or self.mode
         
         if mode == AnalysisMode.LOCAL or (mode == AnalysisMode.AUTO and self.local):
-            return await self._analyze_with_local(diff, method='security')
+            return await self._analyze_with_local(diff, '', method='security')
         elif mode == AnalysisMode.OPENAI or (mode == AnalysisMode.AUTO and self.openai):
-            return await self._analyze_with_openai(diff, method='security')
+            return await self._analyze_with_openai(diff, '', method='security')
         
         return None
     

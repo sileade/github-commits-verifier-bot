@@ -6,6 +6,7 @@ Telegram Bot for GitHub Commits Verification
 
 import os
 import logging
+import asyncio
 from datetime import datetime
 from typing import Optional
 from io import BytesIO
