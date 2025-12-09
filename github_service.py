@@ -6,18 +6,12 @@ GitHub API Service
 
 import logging
 import json
-from typing import Dict, Optional, List, Any
+from typing import Dict, Optional, List, Any, Tuple
 from datetime import datetime
 import asyncio
 
-try:
-    from github import Github, GithubException
-except ImportError:
-    Github = None
-    GithubException = None
-
-import requests
-from requests.exceptions import RequestException
+import aiohttp
+from aiohttp import ClientSession, ClientResponseError
 
 logger = logging.getLogger(__name__)
 
@@ -42,70 +36,73 @@ class GitHubService:
             "Authorization": f"token {token}",
             "Accept": "application/vnd.github.v3+json",
         }
+        self.session: Optional[ClientSession] = None
         
-        # Initialize PyGithub client if available
-        if Github:
-            try:
-                self.github = Github(token)
-            except Exception as e:
-                logger.error(f"Failed to initialize PyGithub: {e}")
-                self.github = None
+    async def init_session(self):
+        """Initialize aiohttp client session."""
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession(headers=self.headers)
+
+    async def close_session(self):
+        """Close aiohttp client session."""
+        if self.session and not self.session.closed:
+            await self.session.close()
+            self.session = None
+
+    def _parse_repo_path(self, repo_path: str) -> Tuple[str, str]:
+        """Helper to parse repository path from URL or owner/repo format."""
+        if repo_path.startswith('http'):
+            # Extract from URL
+            parts = repo_path.rstrip('/').split('/')
+            owner, repo = parts[-2], parts[-1]
         else:
-            self.github = None
-    
-    async def get_repository(self, repo_path: str) -> Optional[Dict[str, Any]]:
-        """
-        Get repository information
-        
-        Args:
-            repo_path: Repository path (owner/repo or URL)
-            
-        Returns:
-            Repository info or None if not found
-        """
+            # Direct format
+            owner, repo = repo_path.split('/')
+        return owner, repo
+
+    async def _fetch(self, url: str, method: str = 'GET', params: Optional[Dict] = None, json_data: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+        """Generic asynchronous fetcher for GitHub API."""
+        await self.init_session()
         try:
-            # Parse repo path
-            if repo_path.startswith('http'):
-                # Extract from URL
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                # Direct format
-                owner, repo = repo_path.split('/')
-            
-            # Get repo info via API
+            async with self.session.request(method, url, params=params, json=json_data, timeout=10) as response:
+                response.raise_for_status()
+                return await response.json()
+        except ClientResponseError as e:
+            logger.error(f"GitHub API error ({e.status}) for {url}: {e.message}")
+            return None
+        except aiohttp.ClientError as e:
+            logger.error(f"Network error fetching {url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching {url}: {e}")
+            return None
+
+    async def get_repository(self, repo_path: str) -> Optional[Dict[str, Any]]:
+        """Get repository information."""
+        try:
+            owner, repo = self._parse_repo_path(repo_path)
             url = f"{self.api_url}/repos/{owner}/{repo}"
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
+            data = await self._fetch(url)
             
-            data = response.json()
-            return {
-                'full_name': data['full_name'],
-                'url': data['html_url'],
-                'description': data.get('description', ''),
-                'stars': data['stargazers_count'],
-                'language': data.get('language', 'N/A'),
-            }
-        except RequestException as e:
-            logger.error(f"Error fetching repository: {e}")
+            if data:
+                return {
+                    'full_name': data['full_name'],
+                    'url': data['html_url'],
+                    'description': data.get('description', ''),
+                    'stars': data['stargazers_count'],
+                    'language': data.get('language', 'N/A'),
+                }
             return None
         except ValueError as e:
             logger.error(f"Invalid repository format: {e}")
             return None
-    
+
     async def get_user_repositories(self) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get all user repositories
+        """Get all user repositories."""
+        url = f"{self.api_url}/user/repos"
+        data = await self._fetch(url, params={"per_page": 100})
         
-        Returns:
-            List of repository info or None
-        """
-        try:
-            url = f"{self.api_url}/user/repos"
-            response = requests.get(url, headers=self.headers, timeout=10, params={"per_page": 100})
-            response.raise_for_status()
-            
-            data = response.json()
+        if data:
             repos = []
             for repo in data:
                 repos.append({
@@ -119,76 +116,38 @@ class GitHubService:
                     'html_url': repo['html_url'],
                 })
             return repos
-        except RequestException as e:
-            logger.error(f"Error fetching user repositories: {e}")
-            return None
-    
+        return None
+
     async def get_last_commit(self, repo_path: str) -> Optional[str]:
-        """
-        Get date of last commit
-        
-        Args:
-            repo_path: Repository path
-            
-        Returns:
-            Formatted date string or None
-        """
+        """Get date of last commit."""
         try:
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
-            
+            owner, repo = self._parse_repo_path(repo_path)
             url = f"{self.api_url}/repos/{owner}/{repo}/commits"
-            response = requests.get(url, headers=self.headers, timeout=10, params={"per_page": 1})
-            response.raise_for_status()
+            data = await self._fetch(url, params={"per_page": 1})
             
-            data = response.json()
             if data:
                 commit_date = data[0]['commit']['author']['date']
                 # Parse and format date
                 dt = datetime.fromisoformat(commit_date.replace('Z', '+00:00'))
                 return dt.strftime("%Y-%m-%d %H:%M:%S")
             return None
-        except RequestException as e:
-            logger.error(f"Error fetching last commit: {e}")
+        except ValueError as e:
+            logger.error(f"Invalid repository format: {e}")
             return None
-    
+
     async def get_commit_history(self, repo_path: str, limit: int = 50) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get commit history for a repository
-        
-        Args:
-            repo_path: Repository path
-            limit: Maximum number of commits to fetch (default 50, max 100 per API)
-            
-        Returns:
-            List of commits or None
-        """
+        """Get commit history for a repository."""
         try:
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
-            
+            owner, repo = self._parse_repo_path(repo_path)
             url = f"{self.api_url}/repos/{owner}/{repo}/commits"
-            per_page = min(limit, 100)  # API max is 100
+            per_page = min(limit, 100)
             
             commits = []
             page = 1
             
             while len(commits) < limit:
-                response = requests.get(
-                    url,
-                    headers=self.headers,
-                    timeout=10,
-                    params={"per_page": per_page, "page": page}
-                )
-                response.raise_for_status()
+                data = await self._fetch(url, params={"per_page": per_page, "page": page})
                 
-                data = response.json()
                 if not data:
                     break
                 
@@ -210,27 +169,18 @@ class GitHubService:
                 page += 1
             
             return commits
-        except RequestException as e:
-            logger.error(f"Error fetching commit history: {e}")
+        except ValueError as e:
+            logger.error(f"Invalid repository format: {e}")
             return None
-    
+
     async def analyze_commits_with_ai(
         self,
         repo_path: str,
         commits: List[Dict[str, Any]],
         analysis_type: str = "summary"
     ) -> Optional[str]:
-        """
-        Analyze commits using local AI (Ollama/Mistral)
-        
-        Args:
-            repo_path: Repository path
-            commits: List of commits to analyze
-            analysis_type: Type of analysis ('summary', 'quality', 'security', 'patterns')
-            
-        Returns:
-            AI analysis result or None
-        """
+        """Analyze commits using local AI (Ollama/Mistral)."""
+        await self.init_session()
         try:
             # Prepare commit data for analysis
             commits_text = "\n\n".join([
@@ -238,7 +188,7 @@ class GitHubService:
                 f"Author: {c['author']}\n"
                 f"Date: {c['date']}\n"
                 f"Message: {c['message'][:200]}..."
-                for c in commits[:20]  # Analyze last 20 commits
+                for c in commits[:20]
             ])
             
             # Create analysis prompt
@@ -271,245 +221,121 @@ Identify development patterns, release cycles, and work patterns.""",
             prompt = prompts.get(analysis_type, prompts["summary"])
             
             # Call Ollama API
-            response = requests.post(
-                f"{self.ollama_host}/api/generate",
-                json={
-                    "model": "mistral",
-                    "prompt": prompt,
-                    "stream": False,
-                    "temperature": 0.7,
-                    "top_p": 0.9,
-                },
-                timeout=60
-            )
-            response.raise_for_status()
+            url = f"{self.ollama_host}/api/generate"
+            json_data = {
+                "model": "mistral",
+                "prompt": prompt,
+                "stream": False,
+                "temperature": 0.7,
+                "top_p": 0.9,
+            }
             
-            result = response.json()
-            return result.get("response", "").strip()
-        except RequestException as e:
-            logger.error(f"Error calling Ollama API: {e}")
+            async with self.session.post(url, json=json_data, timeout=60) as response:
+                response.raise_for_status()
+                result = await response.json()
+                return result.get("response", "").strip()
+        except ClientResponseError as e:
+            logger.error(f"Ollama API error ({e.status}): {e.message}")
+            return None
+        except aiohttp.ClientError as e:
+            logger.error(f"Network error calling Ollama API: {e}")
             return None
         except Exception as e:
             logger.error(f"Error analyzing commits with AI: {e}")
             return None
-    
+
     async def get_commit_info(self, repo_path: str, commit_sha: str) -> Optional[Dict[str, Any]]:
-        """
-        Get commit information
-        
-        Args:
-            repo_path: Repository path
-            commit_sha: Commit SHA
-            
-        Returns:
-            Commit info or None
-        """
+        """Get commit information."""
         try:
-            # Parse repo path
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
-            
-            # Get commit info
+            owner, repo = self._parse_repo_path(repo_path)
             url = f"{self.api_url}/repos/{owner}/{repo}/commits/{commit_sha}"
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
+            data = await self._fetch(url)
             
-            data = response.json()
-            commit = data['commit']
-            
-            return {
-                'repo': f"{owner}/{repo}",
-                'sha': data['sha'],
-                'short_sha': data['sha'][:8],
-                'message': commit['message'],
-                'author': commit['author']['name'],
-                'author_email': commit['author']['email'],
-                'date': commit['author']['date'],
-                'verified': data.get('commit', {}).get('verification', {}).get('verified', False),
-                'url': data['html_url'],
-                'parents': len(data.get('parents', [])),
-            }
-        except RequestException as e:
-            logger.error(f"Error fetching commit: {e}")
+            if data:
+                commit_data = data['commit']
+                return {
+                    'repo': repo_path,
+                    'sha': data['sha'],
+                    'message': commit_data['message'],
+                    'author': commit_data['author']['name'],
+                    'author_email': commit_data['author']['email'],
+                    'date': datetime.fromisoformat(commit_data['author']['date'].replace('Z', '+00:00')).strftime("%Y-%m-%d %H:%M:%S"),
+                    'url': data['html_url'],
+                    'verified': data['commit']['verification']['verified'] if 'verification' in data['commit'] else False,
+                }
             return None
-        except (ValueError, KeyError) as e:
-            logger.error(f"Error parsing commit data: {e}")
+        except ValueError as e:
+            logger.error(f"Invalid repository format: {e}")
             return None
-    
+
     async def get_commit_files(self, repo_path: str, commit_sha: str) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get list of files changed in a commit
-        
-        Args:
-            repo_path: Repository path
-            commit_sha: Commit SHA
-            
-        Returns:
-            List of changed files or None
-        """
+        """Get files changed in a commit."""
         try:
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
-            
+            owner, repo = self._parse_repo_path(repo_path)
             url = f"{self.api_url}/repos/{owner}/{repo}/commits/{commit_sha}"
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
+            data = await self._fetch(url)
             
-            data = response.json()
-            files = []
-            
-            for file in data.get('files', []):
-                files.append({
-                    'filename': file['filename'],
-                    'status': file['status'],
-                    'additions': file['additions'],
-                    'deletions': file['deletions'],
-                    'changes': file['changes'],
-                })
-            
-            return files
-        except RequestException as e:
-            logger.error(f"Error fetching commit files: {e}")
+            if data and 'files' in data:
+                files = []
+                for file in data['files']:
+                    files.append({
+                        'filename': file['filename'],
+                        'status': file['status'],
+                        'additions': file['additions'],
+                        'deletions': file['deletions'],
+                        'changes': file['changes'],
+                        'patch': file.get('patch'),
+                    })
+                return files
             return None
-        except (ValueError, KeyError) as e:
-            logger.error(f"Error parsing commit files: {e}")
+        except ValueError as e:
+            logger.error(f"Invalid repository format: {e}")
             return None
-    
+
     async def verify_commit(self, commit_info: Dict[str, Any]) -> Dict[str, bool]:
-        """
-        Verify commit authenticity
-        
-        Args:
-            commit_info: Commit information dict
-            
-        Returns:
-            Dictionary with verification checks
-        """
+        """Perform basic commit verification checks."""
+        # This is a placeholder for actual verification logic
         checks = {
-            'GPG Подпись': commit_info.get('verified', False),
-            'Известный автор': True,  # Can be extended
-            'Сообщение присутствует': bool(commit_info.get('message', '').strip()),
-            'Валидная дата': self._is_valid_date(commit_info.get('date', '')),
+            "GPG Signature": commit_info.get('verified', False),
+            "Valid Author Email": "@users.noreply.github.com" not in commit_info.get('author_email', ''),
+            "Message Length": len(commit_info.get('message', '')) > 10,
         }
-        
         return checks
-    
-    @staticmethod
-    def _is_valid_date(date_str: str) -> bool:
-        """
-        Check if date string is valid
-        """
+
+    async def get_branch_sha(self, repo_path: str, branch: str) -> Optional[str]:
+        """Get the latest commit SHA for a branch."""
         try:
-            datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            return True
-        except (ValueError, AttributeError):
-            return False
-    
-    async def get_commit_diff(self, repo_path: str, commit_sha: str) -> Optional[str]:
-        """
-        Get commit diff/patch
-        
-        Args:
-            repo_path: Repository path
-            commit_sha: Commit SHA
+            owner, repo = self._parse_repo_path(repo_path)
+            url = f"{self.api_url}/repos/{owner}/{repo}/branches/{branch}"
+            data = await self._fetch(url)
             
-        Returns:
-            Diff string or None
-        """
-        try:
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
-            
-            url = f"{self.api_url}/repos/{owner}/{repo}/commits/{commit_sha}"
-            
-            headers = self.headers.copy()
-            headers['Accept'] = 'application/vnd.github.v3.patch'
-            
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            
-            return response.text
-        except RequestException as e:
-            logger.error(f"Error fetching commit diff: {e}")
+            if data and 'commit' in data:
+                return data['commit']['sha']
             return None
-    
-    async def get_branches(self, repo_path: str) -> Optional[List[str]]:
-        """
-        Get list of branches in repository
-        
-        Args:
-            repo_path: Repository path
-            
-        Returns:
-            List of branch names or None
-        """
-        try:
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
-            
-            url = f"{self.api_url}/repos/{owner}/{repo}/branches"
-            response = requests.get(url, headers=self.headers, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            return [branch['name'] for branch in data]
-        except RequestException as e:
-            logger.error(f"Error fetching branches: {e}")
+        except ValueError as e:
+            logger.error(f"Invalid repository format: {e}")
             return None
-    
-    async def create_branch(self, repo_path: str, new_branch: str, from_ref: str) -> bool:
-        """
-        Create a new branch
-        
-        Args:
-            repo_path: Repository path
-            new_branch: Name of new branch
-            from_ref: Source branch/commit SHA
-            
-        Returns:
-            True if successful, False otherwise
-        """
+
+    async def create_branch(self, repo_path: str, new_branch: str, base_sha: str) -> bool:
+        """Create a new branch from a base SHA."""
         try:
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
-            
-            # First get the SHA of from_ref
-            ref_url = f"{self.api_url}/repos/{owner}/{repo}/commits/{from_ref}"
-            ref_response = requests.get(ref_url, headers=self.headers, timeout=10)
-            ref_response.raise_for_status()
-            from_sha = ref_response.json()['sha']
-            
-            # Create new branch
+            owner, repo = self._parse_repo_path(repo_path)
             url = f"{self.api_url}/repos/{owner}/{repo}/git/refs"
             data = {
                 "ref": f"refs/heads/{new_branch}",
-                "sha": from_sha
+                "sha": base_sha,
             }
             
-            response = requests.post(url, headers=self.headers, json=data, timeout=10)
-            response.raise_for_status()
+            result = await self._fetch(url, method='POST', json_data=data)
             
-            logger.info(f"Created branch {new_branch} in {repo_path}")
-            return True
-        except RequestException as e:
-            logger.error(f"Error creating branch: {e}")
+            if result:
+                logger.info(f"Created branch {new_branch} in {repo_path}")
+                return True
             return False
-    
+        except ValueError as e:
+            logger.error(f"Invalid repository format: {e}")
+            return False
+
     async def create_pull_request(
         self,
         repo_path: str,
@@ -518,26 +344,9 @@ Identify development patterns, release cycles, and work patterns.""",
         title: str,
         body: str
     ) -> Optional[str]:
-        """
-        Create a pull request
-        
-        Args:
-            repo_path: Repository path
-            base: Base branch
-            head: Head branch
-            title: PR title
-            body: PR description
-            
-        Returns:
-            PR URL or None
-        """
+        """Create a pull request."""
         try:
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
-            
+            owner, repo = self._parse_repo_path(repo_path)
             url = f"{self.api_url}/repos/{owner}/{repo}/pulls"
             data = {
                 "title": title,
@@ -546,51 +355,38 @@ Identify development patterns, release cycles, and work patterns.""",
                 "head": head,
             }
             
-            response = requests.post(url, headers=self.headers, json=data, timeout=10)
-            response.raise_for_status()
+            pr_data = await self._fetch(url, method='POST', json_data=data)
             
-            pr_data = response.json()
-            logger.info(f"Created PR: {pr_data['html_url']}")
-            return pr_data['html_url']
-        except RequestException as e:
-            logger.error(f"Error creating pull request: {e}")
+            if pr_data:
+                logger.info(f"Created PR: {pr_data['html_url']}")
+                return pr_data['html_url']
             return None
-    
+        except ValueError as e:
+            logger.error(f"Invalid repository format: {e}")
+            return None
+
     async def cherry_pick_commit(
         self,
         repo_path: str,
         commit_sha: str,
         target_branch: str
     ) -> Optional[str]:
-        """
-        Cherry-pick a commit to target branch
-        
-        Args:
-            repo_path: Repository path
-            commit_sha: Commit SHA to cherry-pick
-            target_branch: Target branch name
-            
-        Returns:
-            New commit SHA or None
-        """
+        """Cherry-pick a commit to target branch."""
         try:
-            if repo_path.startswith('http'):
-                parts = repo_path.rstrip('/').split('/')
-                owner, repo = parts[-2], parts[-1]
-            else:
-                owner, repo = repo_path.split('/')
+            owner, repo = self._parse_repo_path(repo_path)
             
             # Get commit info
             commit_url = f"{self.api_url}/repos/{owner}/{repo}/commits/{commit_sha}"
-            commit_response = requests.get(commit_url, headers=self.headers, timeout=10)
-            commit_response.raise_for_status()
-            commit_data = commit_response.json()
+            commit_data = await self._fetch(commit_url)
+            if not commit_data:
+                return None
             
             # Get target branch HEAD
             branch_url = f"{self.api_url}/repos/{owner}/{repo}/branches/{target_branch}"
-            branch_response = requests.get(branch_url, headers=self.headers, timeout=10)
-            branch_response.raise_for_status()
-            target_sha = branch_response.json()['commit']['sha']
+            branch_data = await self._fetch(branch_url)
+            if not branch_data:
+                return None
+            target_sha = branch_data['commit']['sha']
             
             # Create commit data
             url = f"{self.api_url}/repos/{owner}/{repo}/git/commits"
@@ -605,18 +401,20 @@ Identify development patterns, release cycles, and work patterns.""",
                 }
             }
             
-            response = requests.post(url, headers=self.headers, json=new_commit_data, timeout=10)
-            response.raise_for_status()
-            new_commit_sha = response.json()['sha']
+            new_commit_result = await self._fetch(url, method='POST', json_data=new_commit_data)
+            if not new_commit_result:
+                return None
+            new_commit_sha = new_commit_result['sha']
             
             # Update branch reference
             ref_url = f"{self.api_url}/repos/{owner}/{repo}/git/refs/heads/{target_branch}"
             ref_data = {"sha": new_commit_sha, "force": False}
-            ref_response = requests.patch(ref_url, headers=self.headers, json=ref_data, timeout=10)
-            ref_response.raise_for_status()
+            ref_response = await self._fetch(ref_url, method='PATCH', json_data=ref_data)
             
-            logger.info(f"Cherry-picked {commit_sha} to {target_branch}")
-            return new_commit_sha
-        except RequestException as e:
-            logger.error(f"Error cherry-picking commit: {e}")
+            if ref_response:
+                logger.info(f"Cherry-picked {commit_sha} to {target_branch}")
+                return new_commit_sha
+            return None
+        except ValueError as e:
+            logger.error(f"Invalid repository format: {e}")
             return None

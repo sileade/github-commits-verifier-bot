@@ -28,23 +28,20 @@ class Database:
         
         Args:
             db_url: PostgreSQL connection URL
-                   Default: postgresql://user:password@localhost:5432/github_verifier
                    Can be set via DATABASE_URL environment variable
         """
-        if db_url is None:
-            db_url = os.getenv(
-                'DATABASE_URL',
-                'postgresql://user:password@localhost:5432/github_verifier'
-            )
-        
-        self.db_url = db_url
-        self.pool: Optional[asyncpg.Pool] = None
-        
         if asyncpg is None:
             raise ImportError(
                 "asyncpg is required for PostgreSQL support. "
                 "Install it with: pip install asyncpg"
             )
+            
+        self.db_url = db_url or os.getenv('DATABASE_URL')
+        
+        if not self.db_url:
+            raise ValueError("DATABASE_URL environment variable not set.")
+            
+        self.pool: Optional[asyncpg.Pool] = None
     
     async def init(self) -> None:
         """
@@ -117,36 +114,53 @@ class Database:
             except asyncpg.PostgresError as e:
                 logger.error(f"Error initializing tables: {e}")
                 raise
-    
-    async def add_user(self, user_id: int, username: str) -> bool:
-        """
-        Add or update user
-        
-        Args:
-            user_id: Telegram user ID
-            username: Telegram username
-            
-        Returns:
-            True if successful
-        """
+
+    async def _execute(self, query: str, *args) -> bool:
+        """Helper for executing queries."""
         if not self.pool:
             logger.error("Database pool not initialized")
             return False
-        
         try:
             async with self.pool.acquire() as conn:
-                await conn.execute("""
-                    INSERT INTO users (user_id, username)
-                    VALUES ($1, $2)
-                    ON CONFLICT (user_id) DO UPDATE
-                    SET username = EXCLUDED.username
-                """, user_id, username)
-            
+                await conn.execute(query, *args)
             return True
-        
         except asyncpg.PostgresError as e:
-            logger.error(f"Error adding user: {e}")
+            logger.error(f"Error executing query: {e}")
             return False
+
+    async def _fetch(self, query: str, *args) -> List[asyncpg.Record]:
+        """Helper for fetching records."""
+        if not self.pool:
+            logger.error("Database pool not initialized")
+            return []
+        try:
+            async with self.pool.acquire() as conn:
+                return await conn.fetch(query, *args)
+        except asyncpg.PostgresError as e:
+            logger.error(f"Error fetching records: {e}")
+            return []
+
+    async def _fetchrow(self, query: str, *args) -> Optional[asyncpg.Record]:
+        """Helper for fetching a single row."""
+        if not self.pool:
+            logger.error("Database pool not initialized")
+            return None
+        try:
+            async with self.pool.acquire() as conn:
+                return await conn.fetchrow(query, *args)
+        except asyncpg.PostgresError as e:
+            logger.error(f"Error fetching row: {e}")
+            return None
+    
+    async def add_user(self, user_id: int, username: str) -> bool:
+        """Add or update user."""
+        query = """
+            INSERT INTO users (user_id, username)
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE
+            SET username = EXCLUDED.username
+        """
+        return await self._execute(query, user_id, username)
     
     async def add_verification(
         self,
@@ -155,134 +169,63 @@ class Database:
         commit_sha: str,
         status: str
     ) -> bool:
+        """Add verification record."""
+        query = """
+            INSERT INTO verifications (user_id, repo, commit_sha, status)
+            VALUES ($1, $2, $3, $4)
         """
-        Add verification record
-        
-        Args:
-            user_id: Telegram user ID
-            repo: Repository path
-            commit_sha: Commit SHA
-            status: Verification status (approved/rejected)
-            
-        Returns:
-            True if successful
-        """
-        if not self.pool:
-            logger.error("Database pool not initialized")
-            return False
-        
-        try:
-            async with self.pool.acquire() as conn:
-                await conn.execute("""
-                    INSERT INTO verifications (user_id, repo, commit_sha, status)
-                    VALUES ($1, $2, $3, $4)
-                """, user_id, repo, commit_sha, status)
-            
+        success = await self._execute(query, user_id, repo, commit_sha, status)
+        if success:
             logger.info(f"Verification recorded: {repo} {commit_sha[:8]} - {status}")
-            return True
-        
-        except asyncpg.PostgresError as e:
-            logger.error(f"Error adding verification: {e}")
-            return False
+        return success
     
     async def get_user_history(
         self,
         user_id: int,
         limit: int = 10
     ) -> List[Dict[str, Any]]:
+        """Get user verification history."""
+        query = """
+            SELECT repo, commit_sha, status, created_at
+            FROM verifications
+            WHERE user_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
         """
-        Get user verification history
-        
-        Args:
-            user_id: Telegram user ID
-            limit: Maximum number of records
-            
-        Returns:
-            List of verification records
-        """
-        if not self.pool:
-            logger.error("Database pool not initialized")
-            return []
-        
-        try:
-            async with self.pool.acquire() as conn:
-                rows = await conn.fetch("""
-                    SELECT repo, commit_sha, status, created_at
-                    FROM verifications
-                    WHERE user_id = $1
-                    ORDER BY created_at DESC
-                    LIMIT $2
-                """, user_id, limit)
-            
-            return [dict(row) for row in rows]
-        
-        except asyncpg.PostgresError as e:
-            logger.error(f"Error fetching history: {e}")
-            return []
+        rows = await self._fetch(query, user_id, limit)
+        return [dict(row) for row in rows]
     
     async def get_user_stats(self, user_id: int) -> Dict[str, int]:
+        """Get user verification statistics."""
+        query = """
+            SELECT status, COUNT(*) as count
+            FROM verifications
+            WHERE user_id = $1
+            GROUP BY status
         """
-        Get user verification statistics
+        rows = await self._fetch(query, user_id)
         
-        Args:
-            user_id: Telegram user ID
-            
-        Returns:
-            Dictionary with statistics
-        """
-        if not self.pool:
-            logger.error("Database pool not initialized")
-            return {'total': 0, 'approved': 0, 'rejected': 0}
+        stats = {
+            'total': 0,
+            'approved': 0,
+            'rejected': 0,
+        }
         
-        try:
-            async with self.pool.acquire() as conn:
-                rows = await conn.fetch("""
-                    SELECT status, COUNT(*) as count
-                    FROM verifications
-                    WHERE user_id = $1
-                    GROUP BY status
-                """, user_id)
-            
-            stats = {
-                'total': 0,
-                'approved': 0,
-                'rejected': 0,
-            }
-            
-            for row in rows:
-                stats[row['status']] = row['count']
-                stats['total'] += row['count']
-            
-            return stats
+        for row in rows:
+            stats[row['status']] = row['count']
+            stats['total'] += row['count']
         
-        except asyncpg.PostgresError as e:
-            logger.error(f"Error fetching statistics: {e}")
-            return {'total': 0, 'approved': 0, 'rejected': 0}
+        return stats
     
     async def get_global_stats(self) -> Dict[str, Any]:
+        """Get global statistics across all users."""
+        query = """
+            SELECT
+                COUNT(DISTINCT user_id) as unique_users,
+                COUNT(*) as total_verifications,
+                SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
+                SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
+            FROM verifications
         """
-        Get global statistics across all users
-        
-        Returns:
-            Dictionary with global statistics
-        """
-        if not self.pool:
-            logger.error("Database pool not initialized")
-            return {}
-        
-        try:
-            async with self.pool.acquire() as conn:
-                stats = await conn.fetchrow("""
-                    SELECT
-                        COUNT(DISTINCT user_id) as unique_users,
-                        COUNT(*) as total_verifications,
-                        SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-                        SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected
-                    FROM verifications
-                """)
-            
-            return dict(stats) if stats else {}
-        
-        except asyncpg.PostgresError as e:
-            logger.error(f"Error fetching global stats: {e}")
-            return {}
+        stats = await self._fetchrow(query)
+        return dict(stats) if stats else {}
