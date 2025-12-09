@@ -52,7 +52,7 @@ async def post_init(_app: Application) -> None:
         db = Database()
         await db.init()
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error("Failed to initialize database: %s", e)
         # Re-raise to stop the application if DB is critical
         raise
     
@@ -105,7 +105,7 @@ async def get_user_repositories_status() -> dict:
                 last_commit = last_commits[i]
                 
                 if isinstance(last_commit, Exception):
-                    logger.warning(f"Error getting last commit for {repo['full_name']}: {last_commit}")
+                    logger.warning("Error getting last commit for %s: %s", repo['full_name'], last_commit)
                     last_commit = None
                     
                 status_info[repo['full_name']] = {
@@ -119,7 +119,7 @@ async def get_user_repositories_status() -> dict:
         
         return status_info
     except Exception as e:
-        logger.error(f"Error getting user repositories: {e}")
+        logger.error("Error getting user repositories: %s", e)
         return {}
 
 
@@ -178,7 +178,7 @@ async def start(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
                 
                 menu_text += "\n"
     except Exception as e:
-        logger.error(f"Error loading repositories status: {e}")
+        logger.error("Error loading repositories status: %s", e)
         menu_text += "*⚠️ Не удалось загрузить статус репозиториев*\n\n"
     
     menu_text += "\n*Выберите действие ниже:*"
@@ -602,7 +602,7 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 return COMMIT_INPUT
         
         except Exception as e:
-            logger.error(f"Error handling commit: {e}")
+            logger.error("Error handling commit: %s", e)
             await update.message.reply_text(f"❌ Ошибка: {str(e)}")
             return ConversationHandler.END
             

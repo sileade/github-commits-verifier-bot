@@ -132,7 +132,7 @@ class HybridAIManager:
             return result
         
         except Exception as e:
-            logger.error(f"Local analysis failed: {e}")
+            logger.error("Local analysis failed: %s", e)
             return None
     
     async def _analyze_with_openai(
@@ -163,7 +163,7 @@ class HybridAIManager:
             return result
         
         except Exception as e:
-            logger.error(f"OpenAI analysis failed: {e}")
+            logger.error("OpenAI analysis failed: %s", e)
             return None
     
     async def _analyze_hybrid(self, diff: str, commit_message: str) -> Optional[Dict[str, Any]]:
@@ -207,7 +207,7 @@ class HybridAIManager:
             return combined
         
         except Exception as e:
-            logger.error(f"Hybrid analysis failed: {e}")
+            logger.error("Hybrid analysis failed: %s", e)
             return None
     
     async def analyze_security(
@@ -249,7 +249,7 @@ class HybridAIManager:
         """
         Override analysis mode
         """
-        logger.info(f"Setting analysis mode to: {mode.value}")
+        logger.info("Setting analysis mode to: %s", mode.value)
         self.mode = mode
     
     def get_status(self) -> Dict[str, Any]:

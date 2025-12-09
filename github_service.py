@@ -74,13 +74,13 @@ class GitHubService:
                 response.raise_for_status()
                 return await response.json()
         except ClientResponseError as e:
-            logger.error(f"GitHub API error ({e.status}) for {url}: {e.message}")
+            logger.error("GitHub API error (%s) for %s: %s", e.status, url, e.message)
             return None
         except aiohttp.ClientError as e:
-            logger.error(f"Network error fetching {url}: {e}")
+            logger.error("Network error fetching %s: %s", url, e)
             return None
         except (asyncio.TimeoutError, json.JSONDecodeError) as e:
-            logger.error(f"Unexpected error fetching {url}: {e}")
+            logger.error("Unexpected error fetching %s: %s", url, e)
             return None
 
     async def get_repository(self, repo_path: str) -> Optional[Dict[str, Any]]:
@@ -100,7 +100,7 @@ class GitHubService:
                 }
             return None
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return None
 
     async def get_user_repositories(self) -> Optional[List[Dict[str, Any]]]:
@@ -138,7 +138,7 @@ class GitHubService:
                 return dt.strftime("%Y-%m-%d %H:%M:%S")
             return None
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return None
 
     async def get_commit_history(self, repo_path: str, limit: int = 50) -> Optional[List[Dict[str, Any]]]:
@@ -176,7 +176,7 @@ class GitHubService:
             
             return commits
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return None
 
     async def analyze_commits_with_ai(
@@ -241,13 +241,13 @@ Identify development patterns, release cycles, and work patterns.""",
                 result = await response.json()
                 return result.get("response", "").strip()
         except ClientResponseError as e:
-            logger.error(f"Ollama API error ({e.status}): {e.message}")
+            logger.error("Ollama API error (%s): %s", e.status, e.message)
             return None
         except aiohttp.ClientError as e:
-            logger.error(f"Network error calling Ollama API: {e}")
+            logger.error("Network error calling Ollama API: %s", e)
             return None
         except (asyncio.TimeoutError, json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Error analyzing commits with AI: {e}")
+            logger.error("Error analyzing commits with AI: %s", e)
             return None
 
     async def get_commit_info(self, repo_path: str, commit_sha: str) -> Optional[Dict[str, Any]]:
@@ -273,7 +273,7 @@ Identify development patterns, release cycles, and work patterns.""",
                 }
             return None
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return None
 
     async def get_commit_files(self, repo_path: str, commit_sha: str) -> Optional[List[Dict[str, Any]]]:
@@ -297,7 +297,7 @@ Identify development patterns, release cycles, and work patterns.""",
                 return files
             return None
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return None
 
     async def verify_commit(self, commit_info: Dict[str, Any]) -> Dict[str, bool]:
@@ -321,7 +321,7 @@ Identify development patterns, release cycles, and work patterns.""",
                 return data['commit']['sha']
             return None
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return None
 
     async def create_branch(self, repo_path: str, new_branch: str, base_sha: str) -> bool:
@@ -337,11 +337,11 @@ Identify development patterns, release cycles, and work patterns.""",
             result = await self._fetch(url, method='POST', json_data=data)
             
             if result:
-                logger.info(f"Created branch {new_branch} in {repo_path}")
+                logger.info("Created branch %s in %s", new_branch, repo_path)
                 return True
             return False
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return False
 
     async def create_pull_request(
@@ -366,11 +366,11 @@ Identify development patterns, release cycles, and work patterns.""",
             pr_data = await self._fetch(url, method='POST', json_data=data)
             
             if pr_data:
-                logger.info(f"Created PR: {pr_data['html_url']}")
+                logger.info("Created PR: %s", pr_data['html_url'])
                 return pr_data['html_url']
             return None
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return None
 
     async def cherry_pick_commit(
@@ -420,9 +420,9 @@ Identify development patterns, release cycles, and work patterns.""",
             ref_response = await self._fetch(ref_url, method='PATCH', json_data=ref_data)
             
             if ref_response:
-                logger.info(f"Cherry-picked {commit_sha} to {target_branch}")
+                logger.info("Cherry-picked %s to %s", commit_sha, target_branch)
                 return new_commit_sha
             return None
         except ValueError as e:
-            logger.error(f"Invalid repository format: {e}")
+            logger.error("Invalid repository format: %s", e)
             return None

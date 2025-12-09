@@ -278,35 +278,35 @@ class AppConfig:
             self.telegram.validate()
             logger.info("Telegram config validated")
         except ValueError as e:
-            logger.error(f"Telegram config error: {e}")
+            logger.error("Telegram config error: %s", e)
             raise
         
         try:
             self.github.validate()
             logger.info("GitHub config validated")
         except ValueError as e:
-            logger.error(f"GitHub config error: {e}")
+            logger.error("GitHub config error: %s", e)
             raise
         
         try:
             self.database.validate()
             logger.info("Database config validated")
         except ValueError as e:
-            logger.error(f"Database config error: {e}")
+            logger.error("Database config error: %s", e)
             raise
         
         try:
             self.ollama.validate()
             logger.info("Ollama config validated")
         except ValueError as e:
-            logger.error(f"Ollama config error: {e}")
+            logger.error("Ollama config error: %s", e)
             raise
         
         try:
             self.openai.validate()
             logger.info("OpenAI config validated")
         except ValueError as e:
-            logger.error(f"OpenAI config error: {e}")
+            logger.error("OpenAI config error: %s", e)
             raise
     
     def to_dict(self) -> Dict[str, Any]:

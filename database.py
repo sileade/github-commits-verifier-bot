@@ -51,7 +51,7 @@ class Database:
             logger.info("Connected to PostgreSQL")
             await self._init_tables()
         except (asyncpg.PostgresError, OSError) as e:
-            logger.error(f"Error connecting to PostgreSQL: {e}")
+            logger.error("Error connecting to PostgreSQL: %s", e)
             raise
     
     async def close(self) -> None:
@@ -111,7 +111,7 @@ class Database:
                 logger.info("Database tables initialized successfully")
             
             except asyncpg.PostgresError as e:
-                logger.error(f"Error initializing tables: {e}")
+                logger.error("Error initializing tables: %s", e)
                 raise
 
     async def _execute(self, query: str, *args) -> bool:
@@ -124,7 +124,7 @@ class Database:
                 await conn.execute(query, *args)
             return True
         except asyncpg.PostgresError as e:
-            logger.error(f"Error executing query: {e}")
+            logger.error("Error executing query: %s", e)
             return False
 
     async def _fetch(self, query: str, *args) -> List[asyncpg.Record]:
@@ -136,7 +136,7 @@ class Database:
             async with self.pool.acquire() as conn:
                 return await conn.fetch(query, *args)
         except asyncpg.PostgresError as e:
-            logger.error(f"Error fetching records: {e}")
+            logger.error("Error fetching records: %s", e)
             return []
 
     async def _fetchrow(self, query: str, *args) -> Optional[asyncpg.Record]:
@@ -148,7 +148,7 @@ class Database:
             async with self.pool.acquire() as conn:
                 return await conn.fetchrow(query, *args)
         except asyncpg.PostgresError as e:
-            logger.error(f"Error fetching row: {e}")
+            logger.error("Error fetching row: %s", e)
             return None
     
     async def add_user(self, user_id: int, username: str) -> bool:
@@ -175,7 +175,7 @@ class Database:
         """
         success = await self._execute(query, user_id, repo, commit_sha, status)
         if success:
-            logger.info(f"Verification recorded: {repo} {commit_sha[:8]} - {status}")
+            logger.info("Verification recorded: %s %s - %s", repo, commit_sha[:8], status)
         return success
     
     async def get_user_history(

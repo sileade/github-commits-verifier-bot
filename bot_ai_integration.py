@@ -39,10 +39,10 @@ class BotAIIntegration:
             logger.warning("⚠️ OpenAI library not installed. AI analysis disabled.")
             self.enabled = False
         except ValueError as e:
-            logger.warning(f"⚠️ AI analysis disabled: {e}")
+            logger.warning("⚠️ AI analysis disabled: %s", e)
             self.enabled = False
         except Exception as e:
-            logger.warning(f"⚠️ Unexpected error initializing AI: {e}")
+            logger.warning("⚠️ Unexpected error initializing AI: %s", e)
             self.enabled = False
     
     async def get_ai_analysis_text(self, diff: str, commit_message: str) -> Optional[str]:
@@ -86,7 +86,7 @@ class BotAIIntegration:
             return text
             
         except Exception as e:
-            logger.error(f"Error getting AI analysis: {e}")
+            logger.error("Error getting AI analysis: %s", e)
             return None
     
     async def get_security_analysis_text(self, diff: str) -> Optional[str]:
@@ -111,7 +111,7 @@ class BotAIIntegration:
             return f"\n\n🔐 *Security Analysis:*\n{analysis['security_analysis']}"
             
         except Exception as e:
-            logger.error(f"Error getting security analysis: {e}")
+            logger.error("Error getting security analysis: %s", e)
             return None
     
     async def get_quality_score_text(self, diff: str, commit_message: str) -> Optional[str]:
@@ -145,7 +145,7 @@ class BotAIIntegration:
                 return f"\n\n🎯 *Quality Analysis:*\n{quality['analysis']}"
             
         except Exception as e:
-            logger.error(f"Error getting quality score: {e}")
+            logger.error("Error getting quality score: %s", e)
             return None
 
 

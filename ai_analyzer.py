@@ -102,9 +102,9 @@ class AIAnalyzer:
         except Exception as e:
             # Handle OpenAI-specific errors if available
             if openai and isinstance(e, (openai.APIError, openai.APITimeoutError, openai.RateLimitError)):
-                logger.error(f"OpenAI API error during analysis: {e}")
+                logger.error("OpenAI API error during analysis: %s", e)
             else:
-                logger.error(f"Unexpected error during AI analysis: {e}")
+                logger.error("Unexpected error during AI analysis: %s", e)
             return None
     
     def _create_analysis_prompt(self, diff: str, commit_message: str) -> str:
@@ -225,7 +225,7 @@ Be concise and specific."""
             }
             
         except Exception as e:
-            logger.error(f"Error during security analysis: {e}")
+            logger.error("Error during security analysis: %s", e)
             return None
     
     async def get_commit_quality_score(self, diff: str, commit_message: str) -> Optional[Dict[str, Any]]:
@@ -296,5 +296,5 @@ Provide:
             }
             
         except Exception as e:
-            logger.error(f"Error getting quality score: {e}")
+            logger.error("Error getting quality score: %s", e)
             return None

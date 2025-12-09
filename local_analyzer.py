@@ -52,7 +52,7 @@ class LocalAnalyzer:
             "zephyr"
         ]
         
-        logger.info(f"🤖 Local Analyzer initialized: {self.model} @ {self.ollama_host}")
+        logger.info("🤖 Local Analyzer initialized: %s @ %s", self.model, self.ollama_host)
     
     async def check_ollama_health(self) -> bool:
         """
@@ -69,23 +69,24 @@ class LocalAnalyzer:
                     timeout=aiohttp.ClientTimeout(total=5)
                 ) as resp:
                     if resp.status != 200:
-                        logger.warning(f"Ollama health check failed: {resp.status}")
+                        logger.warning("Ollama health check failed: %s", resp.status)
                         return False
                     
                     data = await resp.json()
                     models = [m.get('name', '').split(':')[0] for m in data.get('models', [])]
                     
                     if self.model in models or f"{self.model}:latest" in [m.get('name') for m in data.get('models', [])]:
-                        logger.info(f"✓ Model '{self.model}' is available")
+                        logger.info("✓ Model '%s' is available", self.model)
                         return True
                     else:
                         logger.warning(
-                            f"Model '{self.model}' not found. Available: {models}\n"
-                            f"Install with: ollama pull {self.model}"
+                            "Model '%s' not found. Available: %s\n"
+                            "Install with: ollama pull %s",
+                            self.model, models, self.model
                         )
                         return False
         except Exception as e:
-            logger.warning(f"Ollama health check error: {e}")
+            logger.warning("Ollama health check error: %s", e)
             return False
     
     async def analyze_diff(self, diff: str, commit_message: str) -> Optional[Dict[str, Any]]:
@@ -107,7 +108,7 @@ class LocalAnalyzer:
             
             prompt = self._create_analysis_prompt(diff, commit_message)
             
-            logger.info(f"Analyzing commit with {self.model}...")
+            logger.info("Analyzing commit with %s...", self.model)
             
             async with aiohttp.ClientSession() as session:
                 payload = {
@@ -125,7 +126,7 @@ class LocalAnalyzer:
                     timeout=aiohttp.ClientTimeout(total=self.timeout)
                 ) as resp:
                     if resp.status != 200:
-                        logger.error(f"Ollama error: {resp.status}")
+                        logger.error("Ollama error: %s", resp.status)
                         return None
                     
                     data = await resp.json()
@@ -140,10 +141,10 @@ class LocalAnalyzer:
                     return result
         
         except asyncio.TimeoutError:
-            logger.error(f"Ollama request timeout (>{self.timeout}s). Model might be slow or busy.")
+            logger.error("Ollama request timeout (>%ss). Model might be slow or busy.", self.timeout)
             return None
         except Exception as e:
-            logger.error(f"Error during local analysis: {e}")
+            logger.error("Error during local analysis: %s", e)
             return None
     
     def _create_analysis_prompt(self, diff: str, commit_message: str) -> str:
@@ -255,7 +256,7 @@ Be concise."""
                     }
         
         except Exception as e:
-            logger.error(f"Error during security analysis: {e}")
+            logger.error("Error during security analysis: %s", e)
             return None
     
     async def get_commit_quality_score(self, diff: str, commit_message: str) -> Optional[Dict[str, Any]]:
@@ -319,5 +320,5 @@ Be concise."""
                     }
         
         except Exception as e:
-            logger.error(f"Error getting quality score: {e}")
+            logger.error("Error getting quality score: %s", e)
             return None
