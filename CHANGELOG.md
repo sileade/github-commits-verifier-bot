@@ -231,3 +231,19 @@ All notable changes to this project will be documented in this file.
 | 3.0.0 | 2025-12-08 | ✅ Released |
 | 2.0.0 | 2025-12-08 | ✅ Released |
 | 1.0.0 | 2025-12-08 | ✅ Released |
+
+
+## [3.2.0] - 2025-12-09
+
+### Added
+
+- **Comprehensive Code Analysis:** Integrated multi-pass static analysis to identify code smells, performance issues, and potential bugs.
+
+### Changed
+
+- **Improved Exception Handling:** Replaced broad `except Exception` clauses with more specific exception types (`aiohttp.ClientError`, `asyncio.TimeoutError`, `json.JSONDecodeError`, `openai.APIError`, `asyncpg.PostgresError`) across the codebase for better error diagnostics and robustness.
+- **Code Style:** Fixed multiple long lines (>120 characters) by reformatting them for better readability in `bot.py`, `github_service.py`, and `ai_analyzer.py`.
+
+### Fixed
+
+- **Potential Unhandled Exceptions:** Ensured that specific exceptions from `aiohttp`, `openai`, and `asyncpg` are caught, preventing unexpected crashes.

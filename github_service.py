@@ -60,7 +60,13 @@ class GitHubService:
             owner, repo = repo_path.split('/')
         return owner, repo
 
-    async def _fetch(self, url: str, method: str = 'GET', params: Optional[Dict] = None, json_data: Optional[Dict] = None) -> Optional[Dict[str, Any]]:
+    async def _fetch(
+        self,
+        url: str,
+        method: str = 'GET',
+        params: Optional[Dict] = None,
+        json_data: Optional[Dict] = None
+    ) -> Optional[Dict[str, Any]]:
         """Generic asynchronous fetcher for GitHub API."""
         await self.init_session()
         try:
@@ -73,7 +79,7 @@ class GitHubService:
         except aiohttp.ClientError as e:
             logger.error(f"Network error fetching {url}: {e}")
             return None
-        except Exception as e:
+        except (asyncio.TimeoutError, json.JSONDecodeError) as e:
             logger.error(f"Unexpected error fetching {url}: {e}")
             return None
 
@@ -240,7 +246,7 @@ Identify development patterns, release cycles, and work patterns.""",
         except aiohttp.ClientError as e:
             logger.error(f"Network error calling Ollama API: {e}")
             return None
-        except Exception as e:
+        except (asyncio.TimeoutError, json.JSONDecodeError, KeyError) as e:
             logger.error(f"Error analyzing commits with AI: {e}")
             return None
 
@@ -259,7 +265,9 @@ Identify development patterns, release cycles, and work patterns.""",
                     'message': commit_data['message'],
                     'author': commit_data['author']['name'],
                     'author_email': commit_data['author']['email'],
-                    'date': datetime.fromisoformat(commit_data['author']['date'].replace('Z', '+00:00')).strftime("%Y-%m-%d %H:%M:%S"),
+                    'date': datetime.fromisoformat(
+                        commit_data['author']['date'].replace('Z', '+00:00')
+                    ).strftime("%Y-%m-%d %H:%M:%S"),
                     'url': data['html_url'],
                     'verified': data['commit']['verification']['verified'] if 'verification' in data['commit'] else False,
                 }

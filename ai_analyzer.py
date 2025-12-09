@@ -10,8 +10,10 @@ import os
 
 try:
     from openai import AsyncOpenAI
+    import openai
 except ImportError:
     AsyncOpenAI = None
+    openai = None
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +76,10 @@ class AIAnalyzer:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a code review expert. Analyze code changes and provide concise summaries in Russian. Be brief and technical."
+                        "content": (
+                            "You are a code review expert. Analyze code changes and "
+                            "provide concise summaries in Russian. Be brief and technical."
+                        )
                     },
                     {
                         "role": "user",
@@ -95,7 +100,11 @@ class AIAnalyzer:
             return result
             
         except Exception as e:
-            logger.error(f"Error during AI analysis: {e}")
+            # Handle OpenAI-specific errors if available
+            if openai and isinstance(e, (openai.APIError, openai.APITimeoutError, openai.RateLimitError)):
+                logger.error(f"OpenAI API error during analysis: {e}")
+            else:
+                logger.error(f"Unexpected error during AI analysis: {e}")
             return None
     
     def _create_analysis_prompt(self, diff: str, commit_message: str) -> str:
@@ -195,7 +204,10 @@ Be concise and specific."""
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a security expert. Analyze code for vulnerabilities and provide security recommendations."
+                        "content": (
+                            "You are a security expert. Analyze code for vulnerabilities "
+                            "and provide security recommendations."
+                        )
                     },
                     {
                         "role": "user",
