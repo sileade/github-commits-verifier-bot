@@ -136,11 +136,9 @@ async def start(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
     await db.add_user(user_id, update.effective_user.username or 'unknown')
     
     menu_text = (
-        "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
-        "┃  🤖 GitHub Commits Verifier  ┃\n"
-        "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-        "Добро пожаловать! Этот бот помогает проверять\n"
-        "и подтверждать коммиты GitHub приложений.\n\n"
+        "🤖 *GitHub Commits Verifier*\n\n"
+        "Проверка и анализ коммитов GitHub\n"
+        "с помощью AI и автоматизации\n\n"
     )
     
     # Add repository status if available
@@ -181,15 +179,16 @@ async def start(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error("Error loading repositories status: %s", e)
         menu_text += "*⚠️ Не удалось загрузить статус репозиториев*\n\n"
     
-    menu_text += "\n*Выберите действие ниже:*"
+    menu_text += "\n*Выберите действие:*"
     
+    # Two-column layout optimized for mobile
     keyboard = [
-        [InlineKeyboardButton("🔍 Проверить коммит", callback_data='check_commit')],
-        [InlineKeyboardButton("📄 Анализ истории коммитов", callback_data='analyze_history')],
-        [InlineKeyboardButton("✅ Подтвердить коммит", callback_data='approve_commit')],
-        [InlineKeyboardButton("❌ Отклонить коммит", callback_data='reject_commit')],
-        [InlineKeyboardButton("📊 История", callback_data='history')],
-        [InlineKeyboardButton("📈 Статистика", callback_data='stats_menu')],
+        [InlineKeyboardButton("🔍 Проверить", callback_data='check_commit'),
+         InlineKeyboardButton("✅ Подтвердить", callback_data='approve_commit')],
+        [InlineKeyboardButton("📄 История", callback_data='analyze_history'),
+         InlineKeyboardButton("❌ Отклонить", callback_data='reject_commit')],
+        [InlineKeyboardButton("📊 Мои данные", callback_data='history'),
+         InlineKeyboardButton("📈 Статистика", callback_data='stats_menu')],
         [InlineKeyboardButton("⚙️ Настройки", callback_data='settings')],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -206,28 +205,22 @@ async def help_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> N
     Help command
     """
     help_text = (
-        "*📚 Справка по командам:*\n\n"
-        "/start - Главное меню\n"
-        "/help - Эта справка\n"
-        "/stats - Статистика проверок\n\n"
-        "*Основные функции:*\n"
-        "🔍 Проверить коммит - просмотр информации о коммите\n"
-        "📄 Анализ истории - проанализировать последние коммиты с помощью AI\n"
-        "✅ Подтвердить коммит - отметить коммит как легитимный\n"
-        "❌ Отклонить коммит - отметить коммит как подозрительный\n"
-        "📊 История - просмотр истории проверок\n"
-        "📈 Статистика - ваша статистика проверок\n\n"
-        "*🤖 Главная страница теперь показывает:*\n"
-        "📦 Все ваши репозитории\n"
-        "📅 Дату последнего коммита\n"
-        "⭐ Количество звезд\n"
-        "💾 Язык программирования\n\n"
-        "*🤖 AI Анализ Коммитов:*\n"
-        "🐍 Локальная AI (Mistral) анализирует:\n"
-        "✅ Прогресс разработки\n"
-        "✅ Качество коммитов\n"
-        "✅ Основные паттерны\n"
-        "✅ Security-related исправления\n"
+        "📚 *Справка по командам*\n\n"
+        "`/start` - Главное меню\n"
+        "`/help` - Эта справка\n"
+        "`/stats` - Статистика проверок\n\n"
+        "*Основные функции:*\n\n"
+        "🔍 *Проверить* - информация о коммите\n"
+        "✅ *Подтвердить* - отметить как легитимный\n"
+        "📄 *История* - анализ последних коммитов\n"
+        "❌ *Отклонить* - отметить как подозрительный\n"
+        "📊 *Мои данные* - история проверок\n"
+        "📈 *Статистика* - ваша статистика\n\n"
+        "*🤖 AI Анализ:*\n\n"
+        "• Прогресс разработки\n"
+        "• Качество коммитов\n"
+        "• Основные паттерны\n"
+        "• Security-анализ\n"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
@@ -482,10 +475,10 @@ async def handle_repo_input(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             "*Выберите тип AI анализа:*"
         )
         keyboard = [
-            [InlineKeyboardButton("📝 Обзор", callback_data='analysis_type_summary')],
-            [InlineKeyboardButton("✨ Качество кода", callback_data='analysis_type_quality')],
-            [InlineKeyboardButton("🔒 Безопасность", callback_data='analysis_type_security')],
-            [InlineKeyboardButton("🔄 Паттерны", callback_data='analysis_type_patterns')],
+            [InlineKeyboardButton("📝 Обзор", callback_data='analysis_type_summary'),
+             InlineKeyboardButton("✨ Качество", callback_data='analysis_type_quality')],
+            [InlineKeyboardButton("🔒 Безопасность", callback_data='analysis_type_security'),
+             InlineKeyboardButton("🔄 Паттерны", callback_data='analysis_type_patterns')],
             [InlineKeyboardButton("🔙 Отмена", callback_data='back_to_menu')],
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
