@@ -1,15 +1,13 @@
 # Core Dependencies
 python-telegram-bot==20.7
-PyGithub==2.1.1
-python-dotenv==1.0.0
 aiohttp==3.9.1
-requests==2.31.0
+python-dotenv==1.0.0
 
 # Database
 asyncpg==0.29.0
 
-# AI Analysis - OpenAI (Cloud)
-openai==1.3.6
+# AI Analysis - Ollama/Mistral
+# Note: The original code used requests for Ollama, which is now replaced with aiohttp in github_service.py
 
 # Data Processing
 pydantic==2.5.0

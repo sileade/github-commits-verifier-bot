@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 # Conversation states
 REPO_INPUT, COMMIT_INPUT, ACTION_CONFIRM, CONFIRM_ACTION, EXPORT_ACTION, BRANCH_INPUT, ANALYSIS_TYPE = range(7)
 
-# Database and GitHub service (initialized at startup)
+# Global service instances
 db: Optional[Database] = None
 github_service: Optional[GitHubService] = None
 
@@ -49,15 +49,22 @@ async def post_init(app: Application) -> None:
     logger.info("Initializing services...")
     
     # Initialize database
-    db = Database()
-    await db.init()
+    try:
+        db = Database()
+        await db.init()
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        # Re-raise to stop the application if DB is critical
+        raise
     
     # Initialize GitHub service
     github_token = os.getenv('GITHUB_TOKEN')
     ollama_host = os.getenv('OLLAMA_HOST', 'http://localhost:11434')
     if not github_token:
         raise ValueError("GITHUB_TOKEN not found in environment variables")
+    
     github_service = GitHubService(github_token, ollama_host)
+    await github_service.init_session()
     
     logger.info("Services initialized successfully")
 
@@ -66,40 +73,49 @@ async def post_shutdown(app: Application) -> None:
     """
     Clean up resources on shutdown
     """
-    global db
+    global db, github_service
     if db:
         await db.close()
+    if github_service:
+        await github_service.close_session()
     logger.info("Shutdown complete")
 
 
-async def get_user_repositories_status(github_token: str) -> dict:
+async def get_user_repositories_status() -> dict:
     """
     Get user repositories with their status and last commit dates
+    Uses the global github_service instance.
     """
+    if not github_service:
+        logger.error("GitHubService not initialized.")
+        return {}
+        
     try:
-        service = GitHubService(github_token)
-        repos = await service.get_user_repositories()
+        repos = await github_service.get_user_repositories()
         
         status_info = {}
-        for repo in repos[:10]:  # Limit to 10 repos for display
-            try:
-                last_commit = await service.get_last_commit(repo['full_name'])
+        if repos:
+            # Use asyncio.gather for concurrent fetching of last commit dates
+            tasks = []
+            repo_list = repos[:10] # Limit to 10 repos for display
+            for repo in repo_list:
+                tasks.append(github_service.get_last_commit(repo['full_name']))
+            
+            last_commits = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for i, repo in enumerate(repo_list):
+                last_commit = last_commits[i]
+                
+                if isinstance(last_commit, Exception):
+                    logger.warning(f"Error getting last commit for {repo['full_name']}: {last_commit}")
+                    last_commit = None
+                    
                 status_info[repo['full_name']] = {
                     'name': repo['name'],
                     'stars': repo.get('stargazers_count', 0),
                     'language': repo.get('language', 'Unknown'),
                     'url': repo['html_url'],
                     'last_commit': last_commit,
-                    'private': repo.get('private', False),
-                }
-            except Exception as e:
-                logger.warning(f"Error getting last commit for {repo['full_name']}: {e}")
-                status_info[repo['full_name']] = {
-                    'name': repo['name'],
-                    'stars': repo.get('stargazers_count', 0),
-                    'language': repo.get('language', 'Unknown'),
-                    'url': repo['html_url'],
-                    'last_commit': None,
                     'private': repo.get('private', False),
                 }
         
@@ -113,8 +129,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Start command handler - show main menu with repository status
     """
+    if not db:
+        await update.message.reply_text("❌ Сервисы не инициализированы. Попробуйте позже.")
+        return
+        
     user_id = update.effective_user.id
-    github_token = os.getenv('GITHUB_TOKEN')
     
     await db.add_user(user_id, update.effective_user.username or 'unknown')
     
@@ -128,7 +147,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     # Add repository status if available
     try:
-        repos_status = await get_user_repositories_status(github_token)
+        repos_status = await get_user_repositories_status()
         
         if repos_status:
             menu_text += "*📦 Ваши репозитории:*\n\n"
@@ -281,228 +300,227 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 status_emoji = "✅" if record['status'] == 'approved' else "❌"
                 history_text += f"{i}. {status_emoji} `{record['repo']}`\n"
                 history_text += f"   🔗 {record['commit_sha'][:8]}...\n"
-                history_text += f"   📅 {record['created_at']}\n\n"
+                history_text += f"   📅 {record['created_at'].strftime('%Y-%m-%d %H:%M:%S')}\n"
             
             keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(history_text, reply_markup=reply_markup, parse_mode='Markdown')
+            await query.edit_message_text(
+                history_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        return ConversationHandler.END
     
     elif callback_data == 'stats_menu':
         user_id = update.effective_user.id
         stats = await db.get_user_stats(user_id)
+        global_stats = await db.get_global_stats()
         
         stats_text = (
             "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
-            "┃  📈 Ваша статистика            ┃\n"
+            "┃  📈 Статистика проверок       ┃\n"
             "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+            "*Ваша статистика:*\n"
+            f"✅ Подтверждено: {stats['approved']}\n"
+            f"❌ Отклонено: {stats['rejected']}\n"
+            f"📊 Всего проверок: {stats['total']}\n\n"
+            "*Общая статистика:*\n"
+            f"👥 Уникальных пользователей: {global_stats.get('unique_users', 0)}\n"
+            f"📊 Всего проверок: {global_stats.get('total_verifications', 0)}\n"
+            f"✅ Всего подтверждено: {global_stats.get('approved', 0)}\n"
+            f"❌ Всего отклонено: {global_stats.get('rejected', 0)}\n"
         )
         
-        stats_text += f"✅ Подтверждено: **{stats['approved']}**\n"
-        stats_text += f"❌ Отклонено: **{stats['rejected']}**\n"
-        stats_text += f"🔍 Всего проверено: **{stats['total']}**\n\n"
-        
-        if stats['total'] > 0:
-            approval_ratio = (stats['approved'] / stats['total']) * 100
-            stats_text += f"📊 Процент одобрений: **{approval_ratio:.1f}%**\n\n"
-            
-            # Visual bar
-            bar_length = 20
-            filled = int((approval_ratio / 100) * bar_length)
-            bar = "█" * filled + "░" * (bar_length - filled)
-            stats_text += f"[{bar}]\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(stats_text, reply_markup=reply_markup, parse_mode='Markdown')
-    
-    elif callback_data == 'settings':
         keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
-            "┃  ⚙️ Настройки                  ┃\n"
-            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
-            "Используйте /help для информации о конфигурации.",
-            reply_markup=reply_markup
+            stats_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
         )
+        return ConversationHandler.END
+    
+    elif callback_data == 'settings':
+        # Placeholder for settings menu
+        settings_text = (
+            "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+            "┃  ⚙️ Настройки                 ┃\n"
+            "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+            "Настройки пока недоступны."
+        )
+        keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            settings_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return ConversationHandler.END
     
     elif callback_data == 'back_to_menu':
-        # Return to main menu
+        # Go back to start menu
         await start(update, context)
+        return ConversationHandler.END
     
+    # Action confirmation callbacks
+    elif callback_data.startswith('approve_') or callback_data.startswith('reject_'):
+        action, commit_sha = callback_data.split('_')
+        repo = context.user_data.get('repo')
+        
+        if not repo:
+            await query.edit_message_text("❌ Ошибка: Репозиторий не найден в контексте.")
+            return ConversationHandler.END
+            
+        user_id = update.effective_user.id
+        status = 'approved' if action == 'approve' else 'rejected'
+        
+        success = await db.add_verification(user_id, repo, commit_sha, status)
+        
+        if success:
+            await query.edit_message_text(
+                f"✅ Коммит `{commit_sha[:8]}` в репозитории `{repo}` был *{status}*.\n\n"
+                "Отправьте /start для главного меню."
+            )
+        else:
+            await query.edit_message_text(
+                f"❌ Ошибка при записи статуса коммита `{commit_sha[:8]}`."
+            )
+        
+        return ConversationHandler.END
+    
+    # Analysis type selection
+    elif callback_data.startswith('analysis_type_'):
+        analysis_type = callback_data.split('_')[-1]
+        repo = context.user_data.get('repo')
+        
+        if not repo:
+            await query.edit_message_text("❌ Ошибка: Репозиторий не найден в контексте.")
+            return ConversationHandler.END
+            
+        await query.edit_message_text(f"⏳ Запускаю AI анализ типа: *{analysis_type}* для `{repo}`...")
+        
+        # Send typing action
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id,
+            action=ChatAction.TYPING
+        )
+        
+        commits = await github_service.get_commit_history(repo, limit=50)
+        
+        if not commits:
+            await query.edit_message_text(f"❌ Не удалось получить историю коммитов для `{repo}`.")
+            return ConversationHandler.END
+            
+        analysis_result = await github_service.analyze_commits_with_ai(repo, commits, analysis_type)
+        
+        if analysis_result:
+            result_text = (
+                "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
+                "┃  🤖 Результат AI Анализа      ┃\n"
+                "┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n\n"
+                f"*Репозиторий:* `{repo}`\n"
+                f"*Тип анализа:* {analysis_type}\n\n"
+                f"{analysis_result}"
+            )
+            
+            keyboard = [[InlineKeyboardButton("🔙 Назад в меню", callback_data='back_to_menu')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            await query.edit_message_text(
+                result_text,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(
+                f"❌ Ошибка при выполнении AI анализа для `{repo}`. Проверьте логи."
+            )
+            
+        return ConversationHandler.END
+        
     return ConversationHandler.END
 
 
 async def handle_repo_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Handle repository input
+    Handle repository input from user
     """
     repo_input = update.message.text.strip()
-    
     action = context.user_data.get('action')
     
-    if action == 'analyze_history':
-        # Analyze commit history with AI
-        await update.message.chat.send_action(ChatAction.TYPING)
-        
-        try:
-            # Show loading message
-            msg = await update.message.reply_text(
-                f"📄 Загружаю историю коммитов из `{repo_input}`...\n\n"
-                f"Инициализация Mistral AI...",
-                parse_mode='Markdown'
-            )
-            
-            # Get commit history
-            commits = await github_service.get_commit_history(repo_input, limit=50)
-            
-            if not commits:
-                await msg.edit_text(
-                    f"❌ Не удалось получить историю коммитов."
-                )
-                return REPO_INPUT
-            
-            await msg.edit_text(
-                f"📄 Последние {len(commits)} коммитов загружены!\n\n"
-                f"🤖 Анализирую с помощью Mistral (may take 30-60 seconds)...",
-                parse_mode='Markdown'
-            )
-            
-            # Show analysis type menu
-            keyboard = [
-                [InlineKeyboardButton("📈 Обзор прогресса", callback_data='analyze_summary')],
-                [InlineKeyboardButton("✅ Оценка качества", callback_data='analyze_quality')],
-                [InlineKeyboardButton("🔐 Поиск Security фиксов", callback_data='analyze_security')],
-                [InlineKeyboardButton(📈 Выявление паттернов", callback_data='analyze_patterns')],
-                [InlineKeyboardButton("🔙 Отмена", callback_data='back_to_menu')],
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            context.user_data['commits'] = commits
-            context.user_data['repo'] = repo_input
-            
-            await msg.edit_text(
-                f"📄 *На что вы хотите сосредоточить анализ?*",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-            
-            return ANALYSIS_TYPE
-        except Exception as e:
-            logger.error(f"Error in analyze_history: {e}")
-            await msg.edit_text(f"❌ Ошибка: {str(e)}")
-            return REPO_INPUT
-    else:
-        # Original check_commit flow
-        await update.message.chat.send_action(ChatAction.TYPING)
-        
-        try:
-            repo_info = await github_service.get_repository(repo_input)
-            
-            if repo_info:
-                context.user_data['repo'] = repo_input
-                await update.message.reply_text(
-                    f"✅ Репозиторий найден!\n\n"
-                    f"📦 `{repo_info['full_name']}`\n"
-                    f"⭐ Stars: {repo_info['stars']}\n"
-                    f"💾 Language: {repo_info['language']}\n\n"
-                    f"📌 Введите SHA коммита для проверки:",
-                    parse_mode='Markdown'
-                )
-                return COMMIT_INPUT
-            else:
-                await update.message.reply_text(
-                    "❌ Репозиторий не найден.\n\n"
-                    "Проверьте URL или имя в формате `owner/repo`",
-                    parse_mode='Markdown'
-                )
-                return REPO_INPUT
-        except Exception as e:
-            logger.error(f"Error getting repository: {e}")
-            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
-            return REPO_INPUT
-
-
-async def handle_analysis_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Handle analysis type selection
-    """
-    query = update.callback_query
-    await query.answer()
-    
-    callback_data = query.data
-    
-    # Map callback to analysis type
-    analysis_types = {
-        'analyze_summary': 'summary',
-        'analyze_quality': 'quality',
-        'analyze_security': 'security',
-        'analyze_patterns': 'patterns',
-    }
-    
-    if callback_data not in analysis_types:
-        return ANALYSIS_TYPE
-    
-    analysis_type = analysis_types[callback_data]
-    commits = context.user_data.get('commits', [])
-    repo = context.user_data.get('repo', '')
-    
+    # Try to parse owner/repo from input
     try:
-        await query.edit_message_text(
-            f"🤖 Провожу AI анализ... (цисло могут занять 30-60 секунд)\n\n"
-            f"📄 Тип: {analysis_type}\n"
-            f"📦 Репозиторий: `{repo}`\n"
-            f"д Коммитов: {len(commits)}",
+        if repo_input.startswith('http'):
+            # Extract from URL
+            parts = repo_input.rstrip('/').split('/')
+            repo_path = f"{parts[-2]}/{parts[-1]}"
+        else:
+            # Direct format
+            repo_path = repo_input
+            
+        context.user_data['repo'] = repo_path
+        
+    except Exception:
+        await update.message.reply_text(
+            "❌ Неверный формат репозитория. Пожалуйста, введите полный URL или `owner/repo`."
+        )
+        return REPO_INPUT
+        
+    if action == 'check_commit':
+        await update.message.reply_text(
+            f"✅ Репозиторий `{repo_path}` принят.\n\n"
+            "📝 Теперь введите SHA коммита для проверки:\n\nПример: `a1b2c3d4e5f6g7h8`",
             parse_mode='Markdown'
         )
+        return COMMIT_INPUT
         
-        # Call AI analysis
-        result = await github_service.analyze_commits_with_ai(repo, commits, analysis_type)
+    elif action == 'analyze_history':
+        # Show analysis type selection
+        analysis_text = (
+            f"✅ Репозиторий `{repo_path}` принят.\n\n"
+            "*Выберите тип AI анализа:*"
+        )
+        keyboard = [
+            [InlineKeyboardButton("📝 Обзор", callback_data='analysis_type_summary')],
+            [InlineKeyboardButton("✨ Качество кода", callback_data='analysis_type_quality')],
+            [InlineKeyboardButton("🔒 Безопасность", callback_data='analysis_type_security')],
+            [InlineKeyboardButton("🔄 Паттерны", callback_data='analysis_type_patterns')],
+            [InlineKeyboardButton("🔙 Отмена", callback_data='back_to_menu')],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         
-        if result:
-            # Format result
-            result_text = f"""
-🤖 *AI Анализ ({analysis_type})*
-📦 Репозиторий: `{repo}`
-📅 Коммитов: {len(commits)}
-
-*Результат:*
-
-{result}
-"""
-            
-            # If result is too long, send in parts
-            if len(result_text) > 4000:
-                await query.edit_message_text(
-                    result_text[:4000] + "\n\n... (результат обрезан)",
-                    parse_mode='Markdown'
-                )
-            else:
-                await query.edit_message_text(result_text, parse_mode='Markdown')
-        else:
-            await query.edit_message_text(
-                "❌ Не удалось проанализировать (твердятся, что Оллама работает)"
-            )
-    except Exception as e:
-        logger.error(f"Error in handle_analysis_type: {e}")
-        await query.edit_message_text(f"❌ Ошибка: {str(e)}")
-    
+        await update.message.reply_text(
+            analysis_text,
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        return ANALYSIS_TYPE
+        
     return ConversationHandler.END
 
 
 async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Handle commit SHA input
+    Handle commit SHA input from user
     """
     commit_sha = update.message.text.strip()
-    
-    await update.message.chat.send_action(ChatAction.TYPING)
-    
     action = context.user_data.get('action')
-    repo = context.user_data.get('repo', 'unknown')
+    repo = context.user_data.get('repo')
     
-    try:
-        if action == 'check_commit':
+    if not repo:
+        await update.message.reply_text("❌ Ошибка: Репозиторий не найден в контексте. Начните с /start.")
+        return ConversationHandler.END
+        
+    if action == 'check_commit':
+        await update.message.reply_text(f"⏳ Ищу информацию о коммите `{commit_sha[:8]}` в `{repo}`...")
+        
+        # Send typing action
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id,
+            action=ChatAction.TYPING
+        )
+        
+        try:
             commit_info = await github_service.get_commit_info(repo, commit_sha)
             
             if commit_info:
@@ -529,7 +547,7 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 
                 # Files info
                 if files:
-                    commit_details += f"*🗁 Отсканыры {len(files)} файлов:*\n"
+                    commit_details += f"*🗁 Изменено {len(files)} файлов:*\n"
                     for file in files[:5]:  # Show first 5
                         status_emoji = {  
                             'added': '🆕',
@@ -578,12 +596,39 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                     parse_mode='Markdown'
                 )
                 return COMMIT_INPUT
-    
-    except Exception as e:
-        logger.error(f"Error handling commit: {e}")
-        await update.message.reply_text(f"❌ Ошибка: {str(e)}")
-    
+        
+        except Exception as e:
+            logger.error(f"Error handling commit: {e}")
+            await update.message.reply_text(f"❌ Ошибка: {str(e)}")
+            return ConversationHandler.END
+            
+    elif action == 'approve_commit' or action == 'reject_commit':
+        user_id = update.effective_user.id
+        status = 'approved' if action == 'approve_commit' else 'rejected'
+        
+        success = await db.add_verification(user_id, repo, commit_sha, status)
+        
+        if success:
+            await update.message.reply_text(
+                f"✅ Коммит `{commit_sha[:8]}` в репозитории `{repo}` был *{status}*.\n\n"
+                "Отправьте /start для главного меню."
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ Ошибка при записи статуса коммита `{commit_sha[:8]}`."
+            )
+        
+        return ConversationHandler.END
+        
     return ConversationHandler.END
+
+
+async def handle_analysis_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Handle analysis type selection from inline keyboard
+    """
+    # This function is now mostly handled by button_callback, but we keep the state for clarity
+    return await button_callback(update, context)
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -616,7 +661,7 @@ def main() -> None:
     # Create application
     application = Application.builder().token(telegram_token).build()
     
-    # Add post_init callback
+    # Add post_init and post_shutdown callbacks
     application.post_init = post_init
     application.post_shutdown = post_shutdown
     
@@ -624,16 +669,18 @@ def main() -> None:
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', start),
-            CallbackQueryHandler(button_callback),
+            CallbackQueryHandler(button_callback, pattern='^(check_commit|analyze_history|approve_commit|reject_commit)$'),
         ],
         states={
             REPO_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_repo_input)],
             COMMIT_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_commit_input)],
             ACTION_CONFIRM: [
-                CallbackQueryHandler(button_callback),
+                CallbackQueryHandler(button_callback, pattern='^(approve_|reject_).*'),
+                CallbackQueryHandler(button_callback, pattern='^back_to_menu$'),
             ],
             ANALYSIS_TYPE: [
-                CallbackQueryHandler(handle_analysis_type),
+                CallbackQueryHandler(button_callback, pattern='^analysis_type_.*'),
+                CallbackQueryHandler(button_callback, pattern='^back_to_menu$'),
             ],
         },
         fallbacks=[CommandHandler('cancel', cancel)],
@@ -642,6 +689,8 @@ def main() -> None:
     # Add handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('help', help_command))
+    application.add_handler(CommandHandler('stats', lambda u, c: button_callback(u, c) if u.message else button_callback(u, c), filters=filters.COMMAND))
+    application.add_handler(CallbackQueryHandler(button_callback, pattern='^(history|stats_menu|settings|back_to_menu|approve_|reject_|analysis_type_).*'))
     application.add_handler(conv_handler)
     application.add_error_handler(error_handler)
     
