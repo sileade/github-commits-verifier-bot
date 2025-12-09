@@ -39,7 +39,7 @@ db: Optional[Database] = None
 github_service: Optional[GitHubService] = None
 
 
-async def post_init(app: Application) -> None:
+async def post_init(_app: Application) -> None:
     """
     Initialize database and services after application startup
     """
@@ -68,7 +68,7 @@ async def post_init(app: Application) -> None:
     logger.info("Services initialized successfully")
 
 
-async def post_shutdown(app: Application) -> None:
+async def post_shutdown(_app: Application) -> None:
     """
     Clean up resources on shutdown
     """
@@ -123,7 +123,7 @@ async def get_user_repositories_status() -> dict:
         return {}
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Start command handler - show main menu with repository status
     """
@@ -150,7 +150,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if repos_status:
             menu_text += "*📦 Ваши репозитории:*\n\n"
             
-            for repo_full_name, repo_info in sorted(repos_status.items()):
+            for _, repo_info in sorted(repos_status.items()):
                 # Emoji for language
                 lang_emoji = {
                     'Python': '🐍',
@@ -201,7 +201,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def help_command(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Help command
     """
@@ -635,7 +635,7 @@ async def handle_analysis_type(update: Update, context: ContextTypes.DEFAULT_TYP
     return await button_callback(update, context)
 
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+async def cancel(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Cancel conversation
     """
@@ -645,7 +645,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def error_handler(_update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Log errors
     """
