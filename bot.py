@@ -257,26 +257,90 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return REPO_INPUT
     
     elif callback_data == 'approve_commit':
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Show repository selection
         await query.edit_message_text(
-            text="✅ Введите репозиторий (owner/repo) для просмотра коммитов:\n\nПример: `sileade/github-commits-verifier-bot`",
+            text="⏳ Загрузка списка репозиториев...",
+            parse_mode='Markdown'
+        )
+        
+        repos = await github_service.get_user_repositories()
+        if not repos:
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                text="❌ Не удалось загрузить репозитории.\n\nПроверьте GitHub token.",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        
+        # Create buttons for repositories (2 columns)
+        keyboard = []
+        for i in range(0, len(repos), 2):
+            row = []
+            for j in range(2):
+                if i + j < len(repos):
+                    repo = repos[i + j]
+                    # Truncate long names
+                    display_name = repo['name'][:20] + '...' if len(repo['name']) > 20 else repo['name']
+                    row.append(InlineKeyboardButton(
+                        f"📁 {display_name}",
+                        callback_data=f"approve_repo_{repo['full_name']}"
+                    ))
+            keyboard.append(row)
+        
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            text=f"✅ *Выберите репозиторий для подтверждения коммита:*\n\nНайдено репозиториев: {len(repos)}",
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
-        context.user_data['action'] = 'approve_commit'
-        return REPO_INPUT
+        return ConversationHandler.END
     
     elif callback_data == 'reject_commit':
-        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        # Show repository selection
         await query.edit_message_text(
-            text="❌ Введите репозиторий (owner/repo) для просмотра коммитов:\n\nПример: `sileade/github-commits-verifier-bot`",
+            text="⏳ Загрузка списка репозиториев...",
+            parse_mode='Markdown'
+        )
+        
+        repos = await github_service.get_user_repositories()
+        if not repos:
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                text="❌ Не удалось загрузить репозитории.\n\nПроверьте GitHub token.",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        
+        # Create buttons for repositories (2 columns)
+        keyboard = []
+        for i in range(0, len(repos), 2):
+            row = []
+            for j in range(2):
+                if i + j < len(repos):
+                    repo = repos[i + j]
+                    # Truncate long names
+                    display_name = repo['name'][:20] + '...' if len(repo['name']) > 20 else repo['name']
+                    row.append(InlineKeyboardButton(
+                        f"📁 {display_name}",
+                        callback_data=f"reject_repo_{repo['full_name']}"
+                    ))
+            keyboard.append(row)
+        
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            text=f"❌ *Выберите репозиторий для отклонения коммита:*\n\nНайдено репозиториев: {len(repos)}",
             parse_mode='Markdown',
             reply_markup=reply_markup
         )
-        context.user_data['action'] = 'reject_commit'
-        return REPO_INPUT
+        return ConversationHandler.END
     
     elif callback_data == 'history':
         user_id = update.effective_user.id
@@ -550,6 +614,51 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return ConversationHandler.END
     
     # Action confirmation callbacks
+    elif callback_data.startswith('approve_repo_') or callback_data.startswith('reject_repo_'):
+        # Handle repository selection for approve/reject
+        action_type = 'approve' if callback_data.startswith('approve_repo_') else 'reject'
+        repo = callback_data.replace('approve_repo_', '').replace('reject_repo_', '')
+        
+        # Show commit list for selected repository
+        await query.edit_message_text(
+            text=f"⏳ Загрузка коммитов из `{repo}`...",
+            parse_mode='Markdown'
+        )
+        
+        commits = await github_service.get_commit_history(repo, limit=10)
+        if not commits:
+            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=f"{action_type}_commit")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                text=f"❌ Не удалось загрузить коммиты из `{repo}`.\n\nПроверьте доступ к репозиторию.",
+                parse_mode='Markdown',
+                reply_markup=reply_markup
+            )
+            return ConversationHandler.END
+        
+        # Create buttons for commits
+        action_emoji = "✅" if action_type == 'approve' else "❌"
+        action_text = "Подтвердить" if action_type == 'approve' else "Отклонить"
+        
+        keyboard = []
+        for commit in commits:
+            sha = commit['sha'][:8]
+            message = commit['message'][:50] + '...' if len(commit['message']) > 50 else commit['message']
+            keyboard.append([InlineKeyboardButton(
+                f"{sha} - {message}",
+                callback_data=f"{action_type}_{commit['sha']}_{repo}"
+            )])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=f"{action_type}_commit")])
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            text=f"{action_emoji} *{action_text} коммит из `{repo}`*\n\nВыберите коммит:",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        return ConversationHandler.END
+    
     elif callback_data.startswith('approve_') or callback_data.startswith('reject_'):
         # Parse callback data: action_sha_repo
         parts = callback_data.split('_', 1)
