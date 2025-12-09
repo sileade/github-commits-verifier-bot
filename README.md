@@ -1,4 +1,4 @@
-# 🤖 GitHub Commits Verifier Bot v3.4 - Mobile UI Redesign
+# 🤖 GitHub Commits Verifier Bot v3.5 - Major Feature Update
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
@@ -9,13 +9,20 @@
 
 **Professional Telegram bot for verifying GitHub commits with AI-powered analysis (cloud or local), diff viewing, and code export to branches.**
 
-> **🚀 v3.4 Update:** This version introduces a redesigned mobile-friendly UI with a two-column menu layout, inspired by modern Telegram bots like @VPN_lease_bot. The new interface is more compact, intuitive, and easier to use on mobile devices.
+> **🚀 v3.5 Update:** This version introduces major new features, including commit list browsing, back buttons in all menus, a GitHub analytics dashboard, and a bot control panel.
 
 ---
 
 ## ✨ Key Features & Recent Improvements
 
-### 🚀 **NEW in v3.4: Mobile UI Redesign**
+### 🚀 **NEW in v3.5: Major Feature Update**
+
+- **Commit List Browsing:** Approve/reject commits from a list instead of by SHA
+- **Back Buttons:** Added back buttons to all submenus for easier navigation
+- **GitHub Analytics:** New dashboard with repository statistics
+- **Bot Control Panel:** Quick access to bot management commands
+
+### 📱 **New Interface Design (v3.4)**
 - **Two-Column Menu:** The main menu and other menus now use a two-column layout, making them more compact and easier to navigate on mobile devices.
 - **Mobile-Friendly Buttons:** Buttons now have shorter, more intuitive labels with emojis for better visual appeal.
 - **Simplified Interface:** The UI has been simplified to reduce clutter and improve user experience.
