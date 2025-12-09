@@ -17,10 +17,38 @@
 
 ### 🚀 **NEW in v3.5: Major Feature Update**
 
-- **Commit List Browsing:** Approve/reject commits from a list instead of by SHA
-- **Back Buttons:** Added back buttons to all submenus for easier navigation
-- **GitHub Analytics:** New dashboard with repository statistics
-- **Bot Control Panel:** Quick access to bot management commands
+#### 📋 **Commit List Browsing**
+- **No more manual SHA entry!** When approving or rejecting commits, the bot now displays a list of the last 10 commits from the repository.
+- Each commit shows its short SHA (8 characters) and message (truncated to 50 characters).
+- Simply click on a commit button to approve or reject it.
+- Includes a "Back" button to return to the main menu.
+
+#### 🔙 **Back Buttons Everywhere**
+- Every submenu now has a "Back" button for easy navigation.
+- No more getting stuck in submenus - always one click away from the main menu.
+- Improved user experience with intuitive navigation flow.
+
+#### 📊 **GitHub Analytics Dashboard**
+- New analytics panel accessible from the main menu.
+- Displays comprehensive repository statistics:
+  - **Total repositories:** Count of all your GitHub repos
+  - **Total stars:** Sum of stars across all repositories
+  - **Primary language:** Most commonly used programming language
+  - **Top 5 repositories:** Sorted by star count with quick overview
+- Helps you understand your GitHub presence at a glance.
+
+#### 🤖 **Bot Control Panel with Quick Update**
+- **One-click bot updates!** New "Update Bot" button in the control panel.
+- Automatically runs the `update.sh` script from within Telegram.
+- Shows real-time status during the update process.
+- Handles errors gracefully with helpful fallback instructions.
+- Includes all essential bot management commands:
+  - Restart bot
+  - Stop bot
+  - Start bot
+  - View logs
+  - Update bot (automated)
+- Perfect for administrators who want to manage the bot without SSH access.
 
 ### 📱 **New Interface Design (v3.4)**
 - **Two-Column Menu:** The main menu and other menus now use a two-column layout, making them more compact and easier to navigate on mobile devices.
