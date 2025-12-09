@@ -1,4 +1,4 @@
-# 🤖 GitHub Commits Verifier Bot v3.1 - Performance Update
+# 🤖 GitHub Commits Verifier Bot v3.3 - Code Quality & Stability
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
@@ -9,39 +9,18 @@
 
 **Professional Telegram bot for verifying GitHub commits with AI-powered analysis (cloud or local), diff viewing, and code export to branches.**
 
-> **🚀 Performance Boost!** This version replaces blocking I/O with asynchronous networking (`aiohttp`), significantly improving bot responsiveness and speed, especially under load.
+> **🚀 v3.3 Update:** This version includes a comprehensive code refactoring focused on stability, performance, and code quality. All identified issues have been resolved, and the codebase is now cleaner and more maintainable.
 
 ---
 
-## ⚡ Quick Start (One Command)
+## ✨ Key Features & Recent Improvements
 
-```bash
-git clone https://github.com/sileade/github-commits-verifier-bot.git
-cd github-commits-verifier-bot
-chmod +x setup.sh && ./setup.sh
-```
-
-The setup script will:
-- ✅ Generate secure PostgreSQL password
-- ✅ Create `.env` configuration
-- ✅ Prompt for Telegram & GitHub tokens
-- ✅ Start PostgreSQL container
-- ✅ Initialize database
-- ✅ Build Docker image
-- ✅ Ready to use!
-
-Then start the bot:
-```bash
-./start.sh
-# or
-docker-compose up -d
-```
-
-> **Note:** First startup will auto-download Mistral model (~5-15 minutes). Subsequent startups are instant! ⚡
-
----
-
-## ✨ Key Features
+### 🚀 **NEW in v3.3: Code Quality & Stability**
+- **Comprehensive Refactoring:** The entire codebase was analyzed and refactored to improve stability and performance.
+- **Bug Fixes:** Fixed critical bugs, including a missing `asyncio` import and incorrect method arguments.
+- **Code Quality:** Removed all unused imports, fixed f-strings without placeholders, and resolved all `pylint` warnings.
+- **Improved Logging:** Converted all logging f-strings to lazy % formatting for better performance.
+- **Enhanced Stability:** Improved exception handling to prevent crashes and ensure the bot remains responsive.
 
 ### 🚀 **NEW in v3.1: Performance & Stability**
 - **Asynchronous I/O:** Replaced blocking `requests` with non-blocking `aiohttp` in `github_service.py` for all GitHub and Ollama API calls. This eliminates event loop blocking and drastically improves concurrency.
@@ -135,6 +114,34 @@ docker-compose up -d
 - Non-root user execution
 - Graceful shutdown
 - **Auto model loading for Ollama**
+
+---
+
+## ⚡ Quick Start (One Command)
+
+```bash
+git clone https://github.com/sileade/github-commits-verifier-bot.git
+cd github-commits-verifier-bot
+chmod +x setup.sh && ./setup.sh
+```
+
+The setup script will:
+- ✅ Generate secure PostgreSQL password
+- ✅ Create `.env` configuration
+- ✅ Prompt for Telegram & GitHub tokens
+- ✅ Start PostgreSQL container
+- ✅ Initialize database
+- ✅ Build Docker image
+- ✅ Ready to use!
+
+Then start the bot:
+```bash
+./start.sh
+# or
+docker-compose up -d
+```
+
+> **Note:** First startup will auto-download Mistral model (~5-15 minutes). Subsequent startups are instant! ⚡
 
 ---
 
@@ -261,7 +268,7 @@ OPENAI_API_KEY=  # оставить пустым
 В `docker-compose.yml` в сервисе `ollama` раскомментируешь:
 
 ```yaml
-oollama:
+ollama:
   # ...
   runtime: nvidia
   environment:
@@ -283,7 +290,7 @@ oollama:
 - ✅ поднимет Ollama
 - ✅ **автоматически скачает модель mistral** (5-15 минут)
 - ✅ запустит бота
-- ✅ дождётся healthcheck'ов
+- ✅ дождётся healthcheck-ов
 
 ### 6. Проверка что всё живо
 
@@ -412,3 +419,4 @@ LOCAL_MODEL=mistral
 
 # Logging
 LOG_LEVEL=INFO
+```
