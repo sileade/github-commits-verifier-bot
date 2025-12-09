@@ -11,7 +11,6 @@ Local LLM Analyzer Service
 """
 
 import logging
-import json
 from typing import Optional, Dict, Any
 import asyncio
 import aiohttp

@@ -7,11 +7,9 @@ Telegram Bot for GitHub Commits Verification
 import os
 import logging
 import asyncio
-from datetime import datetime
 from typing import Optional
-from io import BytesIO
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -74,7 +72,6 @@ async def post_shutdown(app: Application) -> None:
     """
     Clean up resources on shutdown
     """
-    global db, github_service
     if db:
         await db.close()
     if github_service:
@@ -177,7 +174,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 if repo_info['last_commit']:
                     menu_text += f"  📅 Последний коммит: {repo_info['last_commit']}\n"
                 else:
-                    menu_text += f"  📅 Последний коммит: Не найден\n"
+                    menu_text += "  📅 Последний коммит: Не найден\n"
                 
                 menu_text += "\n"
     except Exception as e:
@@ -598,8 +595,8 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                 return ACTION_CONFIRM
             else:
                 await update.message.reply_text(
-                    f"❌ Коммит не найден.\n\n"
-                    f"📌 Введите другой SHA или отправьте /start",
+                    "❌ Коммит не найден.\n\n"
+                    "📌 Введите другой SHA или отправьте /start",
                     parse_mode='Markdown'
                 )
                 return COMMIT_INPUT

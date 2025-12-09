@@ -7,7 +7,6 @@ Utility functions and helpers
 import re
 import logging
 from typing import Tuple, Optional
-from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
