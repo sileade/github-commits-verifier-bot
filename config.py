@@ -358,9 +358,9 @@ if __name__ == '__main__':
     # Test configuration loading
     print("Loading configuration...")
     try:
-        config = get_config()
+        app_config = get_config()
         print("Configuration loaded successfully:")
-        print(config.to_dict())
+        print(app_config.to_dict())
     except ValueError as e:
         print(f"Configuration error: {e}")
         exit(1)
