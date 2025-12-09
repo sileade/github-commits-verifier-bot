@@ -246,7 +246,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Main menu callbacks
     if callback_data == 'check_commit':
         await query.edit_message_text(
-            text="📝 Введите полный URL репозитория GitHub или имя в формате: `owner/repo`\n\nПример: `sileade/github-commits-verifier-bot`",
+            text=(
+                "📝 Введите полный URL репозитория GitHub или имя в формате: "
+                "`owner/repo`\n\nПример: `sileade/github-commits-verifier-bot`"
+            ),
             parse_mode='Markdown'
         )
         context.user_data['action'] = 'check_commit'
@@ -556,7 +559,10 @@ async def handle_commit_input(update: Update, context: ContextTypes.DEFAULT_TYPE
                             'renamed': '📄',
                             'copied': '📃',
                         }.get(file['status'], '📄')
-                        commit_details += f"{status_emoji} {file['filename']} (+{file['additions']}/-{file['deletions']})\n"
+                        commit_details += (
+                            f"{status_emoji} {file['filename']} "
+                            f"(+{file['additions']}/-{file['deletions']})\n"
+                        )
                     if len(files) > 5:
                         commit_details += f"... и еще {len(files) - 5} файлов\n"
                     commit_details += "\n"
@@ -689,8 +695,19 @@ def main() -> None:
     # Add handlers
     application.add_handler(CommandHandler('start', start))
     application.add_handler(CommandHandler('help', help_command))
-    application.add_handler(CommandHandler('stats', lambda u, c: button_callback(u, c) if u.message else button_callback(u, c), filters=filters.COMMAND))
-    application.add_handler(CallbackQueryHandler(button_callback, pattern='^(history|stats_menu|settings|back_to_menu|approve_|reject_|analysis_type_).*'))
+    application.add_handler(
+        CommandHandler(
+            'stats',
+            lambda u, c: button_callback(u, c) if u.message else button_callback(u, c),
+            filters=filters.COMMAND
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(
+            button_callback,
+            pattern='^(history|stats_menu|settings|back_to_menu|approve_|reject_|analysis_type_).*'
+        )
+    )
     application.add_handler(conv_handler)
     application.add_error_handler(error_handler)
     

@@ -51,7 +51,7 @@ class Database:
             self.pool = await asyncpg.create_pool(self.db_url)
             logger.info("Connected to PostgreSQL")
             await self._init_tables()
-        except Exception as e:
+        except (asyncpg.PostgresError, OSError) as e:
             logger.error(f"Error connecting to PostgreSQL: {e}")
             raise
     
