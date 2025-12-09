@@ -9,19 +9,38 @@
 
 **Professional Telegram bot for verifying GitHub commits with AI-powered analysis (cloud or local), diff viewing, and code export to branches.**
 
-> **🚀 v3.5 Update:** This version introduces major new features, including commit list browsing, back buttons in all menus, a GitHub analytics dashboard, and a bot control panel.
+> **🚀 v3.7 Update:** This version completes the UI improvement with repository selectors for all menu items and functional bot control buttons (Start/Stop/Restart).
 
 ---
 
 ## ✨ Key Features & Recent Improvements
 
-### 🚀 **NEW in v3.5: Major Feature Update**
+### 🚀 **NEW in v3.7: Complete UI Improvement**
 
-#### 📋 **Commit List Browsing**
-- **No more manual SHA entry!** When approving or rejecting commits, the bot now displays a list of the last 10 commits from the repository.
+#### 🗂️ **Repository Selector for All Menu Items**
+- **Zero manual input!** All menu items now use button-based repository selection.
+- 🔍 **Check Commit:** Select repository from your GitHub repos, then select commit from list.
+- 📄 **Analyze History:** Select repository from your GitHub repos to view commit history.
+- ✅ **Approve Commit:** Select repository, then select commit to approve.
+- ❌ **Reject Commit:** Select repository, then select commit to reject.
+- Repositories are displayed in a 2-column grid for easy browsing.
+- Each repository button shows the repository name (truncated if too long).
+
+#### 🎮 **Functional Bot Control Buttons**
+- **▶️ Start Bot:** Executes `docker-compose up -d` to start the bot service.
+- **⏸️ Stop Bot:** Executes `docker-compose down` to stop the bot service.
+- **🔄 Restart Bot:** Executes `docker-compose restart` to restart the bot service.
+- **🔄 Update Bot:** Runs `update.sh` script to pull latest code from GitHub and restart.
+- All buttons show real-time status and error messages.
+- Includes timeout protection (60 seconds for start/stop/restart, 5 minutes for update).
+
+### 🚀 **v3.5 Features**
+
+#### 📄 **Commit List Browsing**
+- Displays a list of the last 10 commits from the selected repository.
 - Each commit shows its short SHA (8 characters) and message (truncated to 50 characters).
-- Simply click on a commit button to approve or reject it.
-- Includes a "Back" button to return to the main menu.
+- Simply click on a commit button to view details or approve/reject it.
+- Includes a "Back" button to return to the previous menu.
 
 #### 🔙 **Back Buttons Everywhere**
 - Every submenu now has a "Back" button for easy navigation.

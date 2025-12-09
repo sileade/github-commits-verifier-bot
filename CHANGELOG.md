@@ -2,6 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.0] - 2025-12-09
+
+### Added
+
+- **🗂️ Repository Selector for All Menu Items:** Replaced all manual repository name input with button-based repository selection.
+  - 🔍 **Check Commit:** Now shows repository selector, then commit list from selected repository.
+  - 📄 **Analyze History:** Now shows repository selector, then displays commit history for selected repository.
+  - ✅ **Approve Commit:** Already had repository selector (from v3.6), now consistent with other menu items.
+  - ❌ **Reject Commit:** Already had repository selector (from v3.6), now consistent with other menu items.
+  - Repositories are displayed in a 2-column grid layout for easy browsing.
+  - Each repository button shows the repository name (truncated to 20 characters if too long).
+
+- **🎮 Functional Bot Control Buttons:** Added working Start/Stop/Restart buttons to the Bot Control Panel.
+  - **▶️ Start Bot:** Executes `docker-compose up -d` to start the bot service on the server.
+  - **⏸️ Stop Bot:** Executes `docker-compose down` to stop the bot service on the server.
+  - **🔄 Restart Bot:** Executes `docker-compose restart` to restart the bot service on the server.
+  - All buttons show real-time status updates during execution.
+  - Error handling with helpful error messages and fallback instructions.
+  - Timeout protection: 60 seconds for start/stop/restart operations.
+
+- **🔍 Commit Detail View:** Added detailed commit view when checking commits.
+  - Shows full commit information: repository, SHA, author, date, message.
+  - Displays verification status if the commit was previously approved/rejected.
+  - Includes Approve/Reject buttons for quick action.
+  - "Back" button returns to the commit list.
+
+### Changed
+
+- **Bot Control Panel:** Updated the panel layout to include Start/Stop/Restart buttons alongside the Update button.
+- **Navigation Flow:** Improved navigation consistency across all menu items with uniform "Back" button behavior.
+- **User Experience:** Eliminated all manual text input for repository and commit selection, making the bot fully button-driven.
+
+### Fixed
+
+- **Callback Data Parsing:** Improved parsing of callback data for commit selection to handle repository names with slashes correctly.
+
+---
+
 ## [3.1.0] - 2025-12-09
 
 ### Added
