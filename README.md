@@ -9,7 +9,9 @@
 
 **Professional Telegram bot for verifying GitHub commits with AI-powered analysis (cloud or local), diff viewing, and code export to branches.**
 
-> **🚀 v3.7 Update:** This version completes the UI improvement with repository selectors for all menu items and functional bot control buttons (Start/Stop/Restart).
+> **🚀 v3.7.1 Update:** Code optimization release - eliminated ~200 lines of duplicated code through refactoring. All v3.7 features remain fully functional.
+>
+> **v3.7:** Complete UI improvement with repository selectors for all menu items and functional bot control buttons (Start/Stop/Restart).
 
 ---
 

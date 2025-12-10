@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.7.1] - 2025-12-09
+
+### Changed
+
+- **🛠️ Code Optimization:** Major refactoring to eliminate code duplication and improve maintainability.
+  - Created `show_repository_selector()` helper function to eliminate 4 instances of duplicated repository selection code.
+  - Created `execute_docker_command()` helper function to eliminate 3 instances of duplicated docker-compose execution code.
+  - Reduced code complexity and improved readability.
+  - All functionality remains unchanged - this is a pure refactoring update.
+
+### Fixed
+
+- **Code Quality:** Improved code structure and eliminated ~200 lines of duplicated code.
+- **Maintainability:** Centralized error handling for docker commands and repository selection.
+
+---
+
 ## [3.7.0] - 2025-12-09
 
 ### Added

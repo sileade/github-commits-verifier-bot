@@ -79,6 +79,138 @@ async def post_shutdown(_app: Application) -> None:
     logger.info("Shutdown complete")
 
 
+async def show_repository_selector(
+    query,
+    callback_prefix: str,
+    title: str,
+    back_callback: str = 'back_to_menu'
+) -> int:
+    """
+    Show repository selector with buttons.
+    
+    Args:
+        query: Telegram callback query
+        callback_prefix: Prefix for callback data (e.g., 'check_repo_', 'approve_repo_')
+        title: Title text to display
+        back_callback: Callback data for back button
+    
+    Returns:
+        ConversationHandler.END
+    """
+    await query.edit_message_text(
+        text="⏳ Загрузка списка репозиториев...",
+        parse_mode='Markdown'
+    )
+    
+    repos = await github_service.get_user_repositories()
+    if not repos:
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=back_callback)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            text="❌ Не удалось загрузить репозитории.\n\nПроверьте GitHub token.",
+            parse_mode='Markdown',
+            reply_markup=reply_markup
+        )
+        return ConversationHandler.END
+    
+    # Create buttons for repositories (2 columns)
+    keyboard = []
+    for i in range(0, len(repos), 2):
+        row = []
+        for j in range(2):
+            if i + j < len(repos):
+                repo = repos[i + j]
+                display_name = repo['name'][:20] + '...' if len(repo['name']) > 20 else repo['name']
+                row.append(InlineKeyboardButton(
+                    f"📁 {display_name}",
+                    callback_data=f"{callback_prefix}{repo['full_name']}"
+                ))
+        keyboard.append(row)
+    
+    keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data=back_callback)])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text(
+        text=f"{title}\n\nНайдено репозиториев: {len(repos)}",
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
+    return ConversationHandler.END
+
+
+async def execute_docker_command(
+    query,
+    command: list,
+    timeout: int,
+    success_message: str,
+    error_prefix: str,
+    back_callback: str = 'bot_control'
+) -> int:
+    """
+    Execute docker-compose command and show result.
+    
+    Args:
+        query: Telegram callback query
+        command: Command to execute (list)
+        timeout: Timeout in seconds
+        success_message: Message to show on success
+        error_prefix: Prefix for error message
+        back_callback: Callback data for back button
+    
+    Returns:
+        ConversationHandler.END
+    """
+    try:
+        import subprocess
+        
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd='/opt/github-commits-verifier-bot'
+        )
+        
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=back_callback)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        if result.returncode == 0:
+            await query.edit_message_text(
+                success_message,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        else:
+            error_msg = result.stderr[:500] if result.stderr else 'Неизвестная ошибка'
+            await query.edit_message_text(
+                f"{error_prefix}\n\n```\n{error_msg}\n```",
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+    except subprocess.TimeoutExpired:
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=back_callback)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "❌ *Таймаут*\n\n"
+            f"Операция заняла слишком много времени (>{timeout} сек).\n\n"
+            "💻 Проверьте логи сервера.",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    except Exception as e:
+        logger.error("Error executing docker command: %s", e)
+        keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=back_callback)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text(
+            "❌ *Ошибка*\n\n"
+            f"Не удалось выполнить команду: `{str(e)}`",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+    
+    return ConversationHandler.END
+
+
 async def get_user_repositories_status() -> dict:
     """
     Get user repositories with their status and last commit dates
@@ -239,173 +371,39 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     # Main menu callbacks
     if callback_data == 'check_commit':
         # Show repository selection
-        await query.edit_message_text(
-            text="⏳ Загрузка списка репозиториев...",
-            parse_mode='Markdown'
+        return await show_repository_selector(
+            query,
+            callback_prefix='check_repo_',
+            title='🔍 *Выберите репозиторий для проверки коммитов:*',
+            back_callback='back_to_menu'
         )
-        
-        repos = await github_service.get_user_repositories()
-        if not repos:
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                text="❌ Не удалось загрузить репозитории.\n\nПроверьте GitHub token.",
-                parse_mode='Markdown',
-                reply_markup=reply_markup
-            )
-            return ConversationHandler.END
-        
-        # Create buttons for repositories (2 columns)
-        keyboard = []
-        for i in range(0, len(repos), 2):
-            row = []
-            for j in range(2):
-                if i + j < len(repos):
-                    repo = repos[i + j]
-                    display_name = repo['name'][:20] + '...' if len(repo['name']) > 20 else repo['name']
-                    row.append(InlineKeyboardButton(
-                        f"📁 {display_name}",
-                        callback_data=f"check_repo_{repo['full_name']}"
-                    ))
-            keyboard.append(row)
-        
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            text=f"🔍 *Выберите репозиторий для проверки коммитов:*\n\nНайдено репозиториев: {len(repos)}",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
-        return ConversationHandler.END
     
     elif callback_data == 'analyze_history':
         # Show repository selection
-        await query.edit_message_text(
-            text="⏳ Загрузка списка репозиториев...",
-            parse_mode='Markdown'
+        return await show_repository_selector(
+            query,
+            callback_prefix='history_repo_',
+            title='📄 *Выберите репозиторий для просмотра истории:*',
+            back_callback='back_to_menu'
         )
-        
-        repos = await github_service.get_user_repositories()
-        if not repos:
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                text="❌ Не удалось загрузить репозитории.\n\nПроверьте GitHub token.",
-                parse_mode='Markdown',
-                reply_markup=reply_markup
-            )
-            return ConversationHandler.END
-        
-        # Create buttons for repositories (2 columns)
-        keyboard = []
-        for i in range(0, len(repos), 2):
-            row = []
-            for j in range(2):
-                if i + j < len(repos):
-                    repo = repos[i + j]
-                    display_name = repo['name'][:20] + '...' if len(repo['name']) > 20 else repo['name']
-                    row.append(InlineKeyboardButton(
-                        f"📁 {display_name}",
-                        callback_data=f"history_repo_{repo['full_name']}"
-                    ))
-            keyboard.append(row)
-        
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            text=f"📄 *Выберите репозиторий для просмотра истории:*\n\nНайдено репозиториев: {len(repos)}",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
-        return ConversationHandler.END
     
     elif callback_data == 'approve_commit':
         # Show repository selection
-        await query.edit_message_text(
-            text="⏳ Загрузка списка репозиториев...",
-            parse_mode='Markdown'
+        return await show_repository_selector(
+            query,
+            callback_prefix='approve_repo_',
+            title='✅ *Выберите репозиторий для подтверждения коммитов:*',
+            back_callback='back_to_menu'
         )
-        
-        repos = await github_service.get_user_repositories()
-        if not repos:
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                text="❌ Не удалось загрузить репозитории.\n\nПроверьте GitHub token.",
-                parse_mode='Markdown',
-                reply_markup=reply_markup
-            )
-            return ConversationHandler.END
-        
-        # Create buttons for repositories (2 columns)
-        keyboard = []
-        for i in range(0, len(repos), 2):
-            row = []
-            for j in range(2):
-                if i + j < len(repos):
-                    repo = repos[i + j]
-                    # Truncate long names
-                    display_name = repo['name'][:20] + '...' if len(repo['name']) > 20 else repo['name']
-                    row.append(InlineKeyboardButton(
-                        f"📁 {display_name}",
-                        callback_data=f"approve_repo_{repo['full_name']}"
-                    ))
-            keyboard.append(row)
-        
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            text=f"✅ *Выберите репозиторий для подтверждения коммита:*\n\nНайдено репозиториев: {len(repos)}",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
-        return ConversationHandler.END
     
     elif callback_data == 'reject_commit':
         # Show repository selection
-        await query.edit_message_text(
-            text="⏳ Загрузка списка репозиториев...",
-            parse_mode='Markdown'
+        return await show_repository_selector(
+            query,
+            callback_prefix='reject_repo_',
+            title='❌ *Выберите репозиторий для отклонения коммитов:*',
+            back_callback='back_to_menu'
         )
-        
-        repos = await github_service.get_user_repositories()
-        if not repos:
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                text="❌ Не удалось загрузить репозитории.\n\nПроверьте GitHub token.",
-                parse_mode='Markdown',
-                reply_markup=reply_markup
-            )
-            return ConversationHandler.END
-        
-        # Create buttons for repositories (2 columns)
-        keyboard = []
-        for i in range(0, len(repos), 2):
-            row = []
-            for j in range(2):
-                if i + j < len(repos):
-                    repo = repos[i + j]
-                    # Truncate long names
-                    display_name = repo['name'][:20] + '...' if len(repo['name']) > 20 else repo['name']
-                    row.append(InlineKeyboardButton(
-                        f"📁 {display_name}",
-                        callback_data=f"reject_repo_{repo['full_name']}"
-                    ))
-            keyboard.append(row)
-        
-        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data='back_to_menu')])
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(
-            text=f"❌ *Выберите репозиторий для отклонения коммита:*\n\nНайдено репозиториев: {len(repos)}",
-            parse_mode='Markdown',
-            reply_markup=reply_markup
-        )
-        return ConversationHandler.END
     
     elif callback_data == 'history':
         user_id = update.effective_user.id
@@ -684,51 +682,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "🚀 Выполнение docker-compose up -d...",
             parse_mode='Markdown'
         )
-        
-        try:
-            import subprocess
-            
-            # Start bot using docker-compose
-            result = subprocess.run(
-                ['docker-compose', 'up', '-d'],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                cwd='/opt/github-commits-verifier-bot'
-            )
-            
-            if result.returncode == 0:
-                keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(
-                    "✅ *Бот успешно запущен!*\n\n"
-                    "🚀 Бот работает в фоновом режиме.\n\n"
-                    "👁️ Проверьте работу бота, отправив /start",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-            else:
-                keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                error_msg = result.stderr[:500] if result.stderr else 'Неизвестная ошибка'
-                await query.edit_message_text(
-                    "❌ *Ошибка при запуске*\n\n"
-                    f"```\n{error_msg}\n```",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-        except Exception as e:
-            logger.error("Error starting bot: %s", e)
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "❌ *Ошибка*\n\n"
-                f"Не удалось запустить бот: `{str(e)}`",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        
-        return ConversationHandler.END
+        return await execute_docker_command(
+            query,
+            command=['docker-compose', 'up', '-d'],
+            timeout=60,
+            success_message=(
+                "✅ *Бот успешно запущен!*\n\n"
+                "🚀 Бот работает в фоновом режиме.\n\n"
+                "👁️ Проверьте работу бота, отправив /start"
+            ),
+            error_prefix="❌ *Ошибка при запуске*"
+        )
     
     elif callback_data == 'stop_bot':
         # Stop bot service
@@ -738,51 +702,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "⏸️ Выполнение docker-compose down...",
             parse_mode='Markdown'
         )
-        
-        try:
-            import subprocess
-            
-            # Stop bot using docker-compose
-            result = subprocess.run(
-                ['docker-compose', 'down'],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                cwd='/opt/github-commits-verifier-bot'
-            )
-            
-            if result.returncode == 0:
-                keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(
-                    "✅ *Бот успешно остановлен!*\n\n"
-                    "⏸️ Все контейнеры остановлены.\n\n"
-                    "⚠️ Бот не будет отвечать на сообщения до запуска.",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-            else:
-                keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                error_msg = result.stderr[:500] if result.stderr else 'Неизвестная ошибка'
-                await query.edit_message_text(
-                    "❌ *Ошибка при остановке*\n\n"
-                    f"```\n{error_msg}\n```",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-        except Exception as e:
-            logger.error("Error stopping bot: %s", e)
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "❌ *Ошибка*\n\n"
-                f"Не удалось остановить бот: `{str(e)}`",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        
-        return ConversationHandler.END
+        return await execute_docker_command(
+            query,
+            command=['docker-compose', 'down'],
+            timeout=60,
+            success_message=(
+                "✅ *Бот успешно остановлен!*\n\n"
+                "⏸️ Все контейнеры остановлены.\n\n"
+                "⚠️ Бот не будет отвечать на сообщения до запуска."
+            ),
+            error_prefix="❌ *Ошибка при остановке*"
+        )
     
     elif callback_data == 'restart_bot':
         # Restart bot service
@@ -792,51 +722,17 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             "🔄 Выполнение docker-compose restart...",
             parse_mode='Markdown'
         )
-        
-        try:
-            import subprocess
-            
-            # Restart bot using docker-compose
-            result = subprocess.run(
-                ['docker-compose', 'restart'],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                cwd='/opt/github-commits-verifier-bot'
-            )
-            
-            if result.returncode == 0:
-                keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                await query.edit_message_text(
-                    "✅ *Бот успешно перезапущен!*\n\n"
-                    "🔄 Бот работает с обновлёнными настройками.\n\n"
-                    "👁️ Проверьте работу бота, отправив /start",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-            else:
-                keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                error_msg = result.stderr[:500] if result.stderr else 'Неизвестная ошибка'
-                await query.edit_message_text(
-                    "❌ *Ошибка при перезапуске*\n\n"
-                    f"```\n{error_msg}\n```",
-                    reply_markup=reply_markup,
-                    parse_mode='Markdown'
-                )
-        except Exception as e:
-            logger.error("Error restarting bot: %s", e)
-            keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data='bot_control')]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(
-                "❌ *Ошибка*\n\n"
-                f"Не удалось перезапустить бот: `{str(e)}`",
-                reply_markup=reply_markup,
-                parse_mode='Markdown'
-            )
-        
-        return ConversationHandler.END
+        return await execute_docker_command(
+            query,
+            command=['docker-compose', 'restart'],
+            timeout=60,
+            success_message=(
+                "✅ *Бот успешно перезапущен!*\n\n"
+                "🔄 Бот работает с обновлёнными настройками.\n\n"
+                "👁️ Проверьте работу бота, отправив /start"
+            ),
+            error_prefix="❌ *Ошибка при перезапуске*"
+        )
     
     elif callback_data == 'back_to_menu':
         # Go back to start menu
