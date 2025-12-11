@@ -216,6 +216,22 @@ class Database:
         
         return stats
     
+    async def get_commit_verification(
+        self,
+        repo: str,
+        commit_sha: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get verification status for a specific commit."""
+        query = """
+            SELECT repo, commit_sha, status, created_at, user_id
+            FROM verifications
+            WHERE repo = $1 AND commit_sha = $2
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
+        row = await self._fetchrow(query, repo, commit_sha)
+        return dict(row) if row else None
+    
     async def get_global_stats(self) -> Dict[str, Any]:
         """Get global statistics across all users."""
         query = """

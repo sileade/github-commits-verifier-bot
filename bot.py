@@ -168,7 +168,8 @@ async def execute_docker_command(
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd='/opt/github-commits-verifier-bot'
+            cwd='/opt/github-commits-verifier-bot',
+            check=False  # We handle return code manually
         )
         
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=back_callback)]]
@@ -622,7 +623,8 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5 minutes timeout
-                cwd='/opt/github-commits-verifier-bot'
+                cwd='/opt/github-commits-verifier-bot',
+                check=False  # We handle return code manually
             )
             
             if result.returncode == 0:
@@ -837,7 +839,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         
         # Get commit details
-        commit_info = await github_service.get_commit_details(repo, commit_sha)
+        commit_info = await github_service.get_commit_info(repo, commit_sha)
         
         if not commit_info:
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data=f'check_repo_{repo}')]]
